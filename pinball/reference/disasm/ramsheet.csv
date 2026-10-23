@@ -1,0 +1,22 @@
+Disassembly: https://github.com/rbmichael/pinball_nes_disassembly,,
+,,
+Upper table,score,notes
+1000 chute,1000,
+500 chutes,500,
+Bumpers (left+right of chutes),10,
+Pop bumper,100,
+Left flags,100,All four = +1000
+Bumper (up+left of pop bumper),100,+100 each hit
+Bumper (below that one),10,
+Pills,100,clear for 20*100 bonus (seals)
+Platform,100,
+Right chute,500,"resets tiles, starts tiles spinning"
+Tiles 777,7770,"+magic post, pink background"
+Tiles 333,3330,"+magic post, pink background"
+Tiles Penguins,1000,"+magic post, pink background, double points"
+,,
+Lower table,score,notes
+Pop bumpers,100,
+Card chutes,500,"reveal all = 5000, +magic post, yellow background"
+Left flags,100,"hit all = exit opens, +1000"
+Pink bumpers,10,

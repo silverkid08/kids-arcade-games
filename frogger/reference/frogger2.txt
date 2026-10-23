@@ -1,0 +1,202 @@
+ 
+ Frogger Tutorial part 2 
+ Frogger Tutorial part 2 
+ System Message: WARNING/2 ( <string> , line 5) 
+Explicit markup ends without a blank line; unexpected unindent. 
+ Contents 
+ The Score 
+ Animating Sprites: First Cars 
+ The Road 
+ The River 
+ Now that the sketch contains all the game graphics, the fun can begin:
+time to get the road and river traffic running. 
+ The Score 
+ The first step is to write the code that updates the score. This might seem like an odd thing to
+do first, but the score display will come in quite useful for debugging later. 
+ Looking at the encoded background screen at
+ http://gameduino.com/results/5f30d40b/ 
+, as you mouse over the character image, you can see the code
+of each character. For example, the all-blue character is code 0, the number zero is code 12, the black
+square is code 34 and the frog 'lives' symbol is code 35. Adding these at the top of the sketch: 
+#define BG_BLUE 0
+#define BG_ZERO 12
+#define BG_BLACK 34
+#define BG_LIFE 35
+ makes the code that draws on the screen a little clearer. Now add a couple of functions before setup : 
+static uint16_t atxy(byte x, byte y)
+{
+ return RAM_PIC + 64 * y + x;
+}
+static void draw_score(uint16_t dst, long n)
+{
+ GD.wr(dst + 0, BG_ZERO + (n / 10000) % 10); // ten-thousands
+ GD.wr(dst + 1, BG_ZERO + (n / 1000) % 10); // thousands
+ GD.wr(dst + 2, BG_ZERO + (n / 100) % 10); // hundreds
+ GD.wr(dst + 3, BG_ZERO + (n / 10) % 10); // tens
+ GD.wr(dst + 4, BG_ZERO + n % 10); // ones
+}
+ The atxy function converts from (x, y) screen coordinates to a video memory address. 
+ The draw_score function writes a 5-digit number n onto the screen. It does this one digit at a time, doing the math to extract each digit. It draws each digit by adding BG_ZERO to the digit code, then writing that character to the screen with GD.wr . 
+ So now you can add a line at the end of setup like: 
+draw_score(atxy(0,0), 1337);
+ and the number 01337 gets drawn in the top left of the screen. 
+ Making things a little more fancy, this code in loop counts continuously: 
+static unsigned int t;
+void loop()
+{
+ GD.waitvblank();
+ draw_score(atxy(3, 1), t);
+ t++;
+}
+ it waits for the vertical blank, draws the variable t in
+the score field, then increments t . The result is a score count that
+increases by 72 every second. The t variable is going to be used
+as a time counter (hence &quot; t &quot;) to run
+most of the game's animation. 
+ The complete sketch is here: frogger_score.zip . 
+ Animating Sprites: First Cars 
+ Add some code like this to the bottom of loop 
+GD.__wstartspr(0);
+draw_sprite(t % 100, 216, 3, 0);
+GD.__end();
+ The first line, __wstartspr starts a block write to Gamduino sprite control RAM. This is a super-efficient way of updating all the sprites on the screen, and
+is the preferred method for getting smooth animation. 
+ The second line draw_sprite draws a sprite on the screen. The draw_sprite function itself was automatically created by the sprite encoder tool . The arguments are: 
+ X coordinate, here it's the t variable modulo 100. This means that the X-coordinate will count from 0 to 99, then wrap back to 0. 
+ Y coordinate is 216: this is the position of the first lane of cars on the road 
+ animation frame, looking at the encoded sprite sheet the yellow car is animation frame 3 
+ rotate, set to zero, meaning no sprite rotation 
+ This is moving pretty nicely; it's now time to make a couple of
+improvements. First, instead of wrapping the position every 100,
+by wrapping it at 256 the car will cross the whole screen before
+it reappears on the far side: 
+GD.__wstartspr(0);
+draw_sprite(t % 256, 216, 3, 0);
+GD.__end();
+ If you look closely, you'll see that the car is moving backwards: we want it to drive from right-to-left instead.
+This is easy to fix: replace t with -t in the draw_sprite expression: 
+GD.__wstartspr(0);
+draw_sprite(-t % 256, 216, 3, 0);
+GD.__end();
+ Add a second car at a different position: 
+GD.__wstartspr(0);
+draw_sprite(-t % 256, 216, 3, 0);
+draw_sprite((-t + 128) % 256, 216, 3, 0);
+GD.__end();
+ The code is looking a bit repetitive, this version is a bit cleaner: 
+static void sprite(unsigned int x, int y, byte anim, byte rot = 0)
+{
+ draw_sprite(x % 256, y, anim, rot);
+}
+void loop()
+{
+ GD.waitvblank();
+ draw_score(atxy(3, 1), t);
+ GD.__wstartspr(0);
+ sprite(-t, 216, 3);
+ sprite(-t + 128, 216, 3);
+ GD.__end();
+ t++;
+}
+ The new function sprite factors out the repeated code, which
+makes the actual sprite drawing a little easier to read. 
+ The complete sketch is here: frogger_onecar.zip . 
+ The Road 
+ The rest of the road sprites follow a similar pattern. 
+ // Trucks 
+ sprite ( - t / 2 , 152 , 5 ); 
+ sprite ( - t / 2 + 16 , 152 , 6 ); 
+ sprite ( - t / 2 + 100 , 152 , 5 ); 
+ sprite ( - t / 2 + 116 , 152 , 6 ); 
+ // Green and white racecars 
+ sprite ( 2 * t , 168 , 8 ); 
+ // Purple cars 
+ sprite ( - t , 184 , 7 ); 
+ sprite ( - t + 75 , 184 , 7 ); 
+ sprite ( - t + 150 , 184 , 7 ); 
+ // Dozers 
+ sprite ( t , 200 , 4 ); 
+ sprite ( t + 50 , 200 , 4 ); 
+ sprite ( t + 150 , 200 , 4 ); 
+ // Yellow cars 
+ sprite ( - t , 216 , 3 ); 
+ sprite ( - t + 128 , 216 , 3 ); 
+ The dozers on the second lane (16 pixels above the first) are moving to the right, so their X-coordinate is just t .
+The purple cars move to the left, so they use -t , just like the
+yellow cars. The racecar moves to the right, but faster, so an
+expression of 2 * t makes it move across the screen at double
+the regular speed. The trucks move right-to-left at half speed,
+so their position is -t / 2 .
+If you look at the original sprite sheet you will see
+that the trucks
+are actually made from two sprites: frames 5 and 6. To draw the
+whole truck, the code draws frame 5, then frame 6 is 16 pixels to
+the right. 
+ The complete sketch is here: frogger_road.zip . 
+ The River 
+ The river sprites - turtles and logs - move much like the road
+traffic. But to keep the code easy to read, it's a good idea to
+again make functions to draw groups of sprites. Because the turtles and
+logs are different lengths in the different lanes, the drawing functions
+have a length parameter: 
+ static void turtle ( byte length , byte x , byte y ) 
+ { 
+ byte anim = 50 + (( t / 32 ) % 3 ); 
+ while ( length -- ) { 
+ sprite ( x , y , anim ); 
+ x += 16 ; 
+ } 
+ } 
+ void log ( byte length , byte x , byte y ) 
+ { 
+ sprite ( x , y , 86 ); 
+ while ( length -- ) { 
+ x += 16 ; 
+ sprite ( x , y , 87 ); 
+ } 
+ sprite ( x + 16 , y , 88 ); 
+ } 
+ static int riverat ( byte y , uint16_t tt ) 
+ { 
+ switch ( y ) { 
+ case 120 : return - tt ; 
+ case 104 : return tt ; 
+ case 88 : return 5 * tt / 4 ; 
+ case 72 : return - tt / 2 ; 
+ case 56 : return tt / 2 ; 
+ } 
+ } 
+ The riverat function computes the sprite X-coordinate given a
+lane Y-coordinate and a time tt . The reason for splitting
+out the river math like this will become clear later. 
+ One small trick here is the animation in the turtle function.
+The turtles use sprite frames 50,51 and 52. To animate them, the
+game needs to display these sprites in order. The function uses
+the time variable t and divides it by 32. This gives a timer
+that counts 32 times more slowly than t : 
+ t / 32  = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11...
+ because there are three repeating sprite frames, the next step is
+to use the modulo 3 operator to make it into a repeating cycle: 
+ (t / 32) %3  = 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2...
+ and because the sprite frames are 50, 51, and 52, adding 50 gives the sprite frames: 
+ 50 + ((t / 32) %3)  = 50, 51, 52, 50, 51, 52, 50, 51, 52, 50, 51, 52, ...
+ With these functions written, the river drawing itself looks like: 
+ // Top logs 
+ for ( int i = 0 ; i < 210 ; i += 70 ) 
+ log ( 2 , riverat ( 56 , t ) + i , 56 ); 
+ // Turtles again, but slower 
+ for ( int i = 0 ; i < 250 ; i += 50 ) 
+ turtle ( 2 , riverat ( 72 , t ) + i , 72 ); 
+ // Long logs 
+ for ( int i = 0 ; i < 256 ; i += 128 ) 
+ log ( 5 , riverat ( 88 , t ) + i , 88 ); 
+ // Short logs 
+ for ( int i = 0 ; i < 240 ; i += 80 ) 
+ log ( 1 , riverat ( 104 , t ) + i , 104 ); 
+ // Turtles 
+ for ( int i = 0 ; i < 256 ; i += 64 ) 
+ turtle ( 3 , riverat ( 120 , t ) + i , 120 ); 
+ Because the river elements repeat so much, it makes more sense to use for() loops here
+to draw all the objects in each lane. 
+ The complete sketch is here: frogger_river.zip . 
+ In part 3 rest of the game code will be added. 

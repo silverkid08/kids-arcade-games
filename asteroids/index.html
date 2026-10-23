@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>ASTEROIDS</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", Courier, monospace; font-weight: bold;
+    color: #fff; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #stage { position: relative; }
+  canvas { display: block; background: #000; }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    background: rgba(0,0,0,.82); text-align: center; padding: 12px; overflow: auto;
+  }
+  #overlay.hidden { display: none; }
+  #title { margin: 0; font-size: 36px; letter-spacing: 10px; color: #e8f4ff;
+           text-shadow: 0 0 16px rgba(150,200,255,.75), 0 0 2px #fff; }
+  #sub { margin: 0; font-size: 12px; line-height: 1.8; color: #d8e4f0; letter-spacing: 1px; min-height: 1.8em; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .lbl { font-size: 10px; color: #8fc3ff; letter-spacing: 2px; }
+  #presets button, .knob button, #invuln, #play {
+    font: inherit; color: #fff; background: #060a14; border: 2px solid #2a4a7a; border-radius: 5px; cursor: pointer;
+  }
+  #presets button { font-size: 12px; letter-spacing: 2px; padding: 6px 10px; }
+  #presets button:hover, .knob button:hover, #invuln:hover { border-color: #9cc8ff; }
+  #presets button.sel { background: #1c3d6e; border-color: #e8f4ff; color: #e8f4ff; }
+  #knobs { display: grid; grid-template-columns: auto auto; gap: 4px 14px; align-items: center; }
+  .knob { display: contents; }
+  .knob .name { font-size: 10px; letter-spacing: 1px; color: #b8cde4; text-align: right; }
+  .knob .ctl { display: flex; align-items: center; gap: 6px; }
+  .knob button { width: 26px; height: 24px; font-size: 13px; padding: 0; line-height: 1; }
+  .knob .val { font-size: 12px; min-width: 64px; text-align: center; color: #fff; }
+  .knob.focus .name { color: #e8f4ff; text-shadow: 0 0 6px rgba(150,200,255,.8); }
+  #invuln { font-size: 11px; letter-spacing: 2px; padding: 6px 12px; }
+  #invuln.on { background: #5a1a1a; border-color: #ff8a8a; color: #ffd0d0; }
+  #scores { margin: 0; font-size: 11px; color: #9cc8ff; letter-spacing: 1px; line-height: 1.7; }
+  #play {
+    font-size: 15px; letter-spacing: 3px; padding: 10px 24px;
+    color: #000; background: #e8f4ff; border: 0;
+  }
+  #play:hover { background: #fff; }
+  .hint { margin: 0; font-size: 10px; color: #7b8794; line-height: 1.8; letter-spacing: 1px; }
+  #badge {
+    position: absolute; right: 10px; top: 8px; font-size: 11px; letter-spacing: 2px;
+    color: #ffb0b0; border: 1px solid #ff7a7a; border-radius: 4px; padding: 3px 8px;
+    background: rgba(60,0,0,.55); pointer-events: none; display: none;
+  }
+  #badge.on { display: block; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen"></canvas>
+  <div id="badge">INVULNERABLE</div>
+  <div id="overlay">
+    <h1 id="title">ASTEROIDS</h1>
+    <p id="sub"></p>
+    <div class="row" id="presets"><span class="lbl">PRESET</span></div>
+    <div id="knobs"></div>
+    <button id="invuln">INVULNERABLE: OFF</button>
+    <p id="scores"></p>
+    <button id="play">PLAY</button>
+    <p class="hint">ROTATE &larr; &rarr; (A D) &nbsp;&middot;&nbsp; THRUST &uarr; (W) &nbsp;&middot;&nbsp; FIRE SPACE &nbsp;&middot;&nbsp; HYPERSPACE &darr; (S / SHIFT)<br>P pause &nbsp;&middot;&nbsp; M sound &nbsp;&middot;&nbsp; ESC menu &nbsp;&middot;&nbsp; 1-4 preset &nbsp;&middot;&nbsp; I invulnerable</p>
+  </div>
+</div>
+<script>
+/* =====================================================================
+   ASTEROIDS (Atari, 1979) - a kid-friendly but arcade-faithful clone.
+   Game rules, timings and constants follow the Rev. 2 ROM as documented
+   in Lonnie McClure's commented disassembly (6502disassembly.com) and
+   the Computer Archeology vector ROM listing.  Every shape on screen is
+   the arcade's own DVG vector data (ships, rocks, saucer, shrapnel,
+   font).  Additions for kids: an invulnerable mode and difficulty knobs.
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * Geometry.  The arcade keeps object positions in 1/8-pixel units on a
+ * 1024 x 768 field (x 0..8191, y 0..6143, y grows UPWARDS like the
+ * vector monitor).  The DVG addresses a 1024 x 1024 square; the field
+ * occupies DVG y 128..895.  MAME's visible area is 1044 x 788 (10 px of
+ * overscan on every side) and that is what the canvas reproduces.
+ * ------------------------------------------------------------------ */
+const FW = 8192, FH = 6144;                 // field size, 1/8 px units
+const VIEW_W = 1044, VIEW_H = 788;          // logical canvas size
+const VIEW_X0 = -10, VIEW_YTOP = 906;       // DVG x at the left edge, DVG y at the top edge
+const FPS = 60;
+
+/* DVG global-scale nibble -> multiplier applied to the listing units
+   below.  The hardware adds global and local scale and runs the vector
+   for 2^total clocks, so the nibble behaves like a signed value:
+   0 = x1, 1 = x2, 15 = x1/2, 14 = x1/4, 11 = x1/32.  Verified against
+   MAME's dvg handler and the ROM's hit boxes (large rock pattern +-32
+   units vs. a 33 px hit box). */
+function dvgScale(nibble) { nibble &= 15; return Math.pow(2, nibble < 8 ? nibble : nibble - 16); }
+
+/* ------------------------------------------------------------------ *
+ * The arcade's vector ROM shapes.  Each entry is a list of
+ * [dx, dy, brightness] segments in "listing units" (what the DVG draws
+ * at global scale 0).  Brightness 0 is a blank move.  A zero-length
+ * bright segment is a dot.  Source: Computer Archeology, Asteroids
+ * VectorROM (addresses given); copied to reference/vector-shapes.json.
+ *   ShipDir0..64  the 17 pre-rotated ships (0 = right ... 64 = up),
+ *                 mirrored by the game code for the other quadrants
+ *   ThrustDir*    the flame that follows each ship
+ *   Rock1..4      the four asteroid outlines (large = x1, medium x1/2, small x1/4)
+ *   Saucer        one outline (large x1/2, small x1/4)
+ *   Shrapnel1..4  the explosion dot patterns
+ *   ShipExplosion the six ship fragments; ShipExplosionVel their velocities
+ *   LifeShip      the reserve-ship icon, char_*  the vector font, Copyright
+ * ------------------------------------------------------------------ */
+const SHAPES = {
+  "Copyright": {"segs":[[0,0,0],[6,-2,7],[6,2,7],[0,8,7],[-6,2,7],[-6,-2,7],[0,-8,7],[8,6,0],[-4,0,7],[0,-4,7],[4,0,7],[8,-4,0]]},
+  "ShipExplosion": {"segs":[[-8,-12,12],[4,-8,12],[6,2,12],[-8,8,12],[-6,2,12],[4,-4,12]]},
+  "ShipExplosionVel": {"segs":[[-40,30],[50,-20],[0,-60],[60,20],[10,70],[-40,-40]]},
+  "Shrapnel1": {"segs":[[-16,0,0],[0,0,7],[-16,-16,0],[0,0,7],[16,-16,0],[0,0,7],[24,8,0],[0,0,7],[16,-8,0],[0,0,7],[0,16,0],[0,0,7],[8,24,0],[0,0,7],[-8,24,0],[0,0,7],[-32,-8,0],[0,0,7],[-24,8,0],[0,0,7]]},
+  "Shrapnel2": {"segs":[[-14,0,0],[0,0,7],[-14,-14,0],[0,0,7],[14,-14,0],[0,0,7],[21,7,0],[0,0,7],[14,-7,0],[0,0,7],[0,14,0],[0,0,7],[7,21,0],[0,0,7],[-7,21,0],[0,0,7],[-28,-7,0],[0,0,7],[-21,7,0],[0,0,7]]},
+  "Shrapnel3": {"segs":[[-12,0,0],[0,0,7],[-12,-12,0],[0,0,7],[12,-12,0],[0,0,7],[18,6,0],[0,0,7],[12,-6,0],[0,0,7],[0,12,0],[0,0,7],[6,18,0],[0,0,7],[-6,18,0],[0,0,7],[-24,-6,0],[0,0,7],[-18,6,0],[0,0,7]]},
+  "Shrapnel4": {"segs":[[-10,0,0],[0,0,7],[-10,-10,0],[0,0,7],[10,-10,0],[0,0,7],[15,5,0],[0,0,7],[10,-5,0],[0,0,7],[0,10,0],[0,0,7],[5,15,0],[0,0,7],[-5,15,0],[0,0,7],[-20,-5,0],[0,0,7],[-15,5,0],[0,0,7]]},
+  "Rock1": {"segs":[[0,16,0],[16,16,7],[16,-16,7],[-8,-16,7],[8,-16,7],[-24,-16,8],[-24,0,8],[-16,16,7],[0,32,7],[16,16,7],[16,-16,7]]},
+  "Rock2": {"segs":[[16,8,0],[16,8,7],[-16,16,7],[-16,-8,7],[-16,8,7],[-16,-16,7],[8,-16,7],[-8,-16,7],[16,-16,7],[8,8,7],[24,-8,8],[16,24,8],[-16,16,7]]},
+  "Rock3": {"segs":[[-16,0,0],[-16,-8,7],[16,-24,7],[16,24,7],[0,-24,7],[16,0,7],[16,24,7],[0,16,7],[-16,24,7],[-24,0,7],[-24,-24,7],[16,-8,7]]},
+  "Rock4": {"segs":[[8,0,0],[24,8,7],[0,8,6],[-24,16,7],[-24,0,7],[8,-16,6],[-24,0,7],[0,-24,7],[16,-24,7],[24,8,7],[8,-8,6],[16,16,6],[-24,16,7]]},
+  "Saucer": {"segs":[[-16,8,0],[32,0,12],[24,-16,0],[-80,0,13],[24,-16,13],[32,0,12],[24,16,13],[-24,16,13],[-8,16,12],[-16,0,12],[-8,-16,12],[-24,-16,13]]},
+  "ShipDir0": {"segs":[[-24,-16,0],[0,32,12],[-16,16,11],[96,-32,12],[-96,-32,12],[16,16,11]]},
+  "ThrustDir0": {"segs":[[-32,16,12],[32,16,12]]},
+  "ShipDir4": {"segs":[[-22,-18,0],[-3,32,12],[-17,14,12],[99,-22,12],[-92,-41,12],[14,17,12]]},
+  "ThrustDir4": {"segs":[[-33,13,12],[30,19,12]]},
+  "ShipDir8": {"segs":[[-20,-20,0],[-6,31,12],[-19,13,12],[100,-13,12],[-88,-50,12],[13,19,12]]},
+  "ThrustDir8": {"segs":[[-35,9,12],[28,22,12]]},
+  "ShipDir12": {"segs":[[-18,-22,0],[-9,31,12],[-20,11,12],[101,-3,12],[-83,-58,12],[11,20,12]]},
+  "ThrustDir12": {"segs":[[-35,6,12],[26,25,12]]},
+  "ShipDir16": {"segs":[[-16,-24,0],[-12,30,12],[-21,9,12],[101,7,12],[-76,-66,12],[9,21,12]]},
+  "ThrustDir16": {"segs":[[-36,3,12],[23,27,12]]},
+  "ShipDir20": {"segs":[[-14,-25,0],[-15,28,12],[-22,7,12],[100,17,12],[-70,-73,12],[7,22,12]]},
+  "ThrustDir20": {"segs":[[-36,-1,12],[21,29,12]]},
+  "ShipDir24": {"segs":[[-11,-27,0],[-18,27,12],[-22,4,12],[98,27,12],[-62,-80,12],[4,22,12]]},
+  "ThrustDir24": {"segs":[[-35,-4,12],[18,31,12]]},
+  "ShipDir28": {"segs":[[-8,-28,0],[-20,25,12],[-23,2,12],[95,36,12],[-54,-86,12],[2,23,12]]},
+  "ThrustDir28": {"segs":[[-35,-8,12],[15,33,12]]},
+  "ShipDir32": {"segs":[[-6,-28,0],[-23,23,12],[-23,0,12],[91,45,12],[-45,-91,12],[0,23,12]]},
+  "ThrustDir32": {"segs":[[-34,-11,12],[11,34,12]]},
+  "ShipDir36": {"segs":[[-3,-29,0],[-25,20,12],[-23,-2,12],[86,54,12],[-36,-95,12],[-2,23,12]]},
+  "ThrustDir36": {"segs":[[-33,-15,12],[8,35,12]]},
+  "ShipDir40": {"segs":[[0,-29,0],[-27,18,12],[-22,-4,12],[80,62,12],[-27,-98,12],[-4,22,12]]},
+  "ThrustDir40": {"segs":[[-31,-18,12],[4,35,12]]},
+  "ShipDir44": {"segs":[[3,-29,0],[-28,15,12],[-22,-7,12],[73,70,12],[-17,-100,12],[-7,22,12]]},
+  "ThrustDir44": {"segs":[[-29,-21,12],[1,36,12]]},
+  "ShipDir48": {"segs":[[6,-28,0],[-30,12,12],[-21,-9,12],[66,76,12],[-7,-101,12],[-9,21,12]]},
+  "ThrustDir48": {"segs":[[-27,-23,12],[-3,36,12]]},
+  "ShipDir52": {"segs":[[8,-28,0],[-31,9,12],[-20,-11,12],[58,83,12],[3,-101,12],[-11,20,12]]},
+  "ThrustDir52": {"segs":[[-25,-26,12],[-6,35,12]]},
+  "ShipDir56": {"segs":[[11,-27,0],[-31,6,12],[-19,-13,12],[50,88,12],[13,-100,12],[-13,19,12]]},
+  "ThrustDir56": {"segs":[[-22,-28,12],[-9,35,12]]},
+  "ShipDir60": {"segs":[[14,-25,0],[-32,3,12],[-17,-14,12],[41,92,12],[22,-99,12],[-14,17,12]]},
+  "ThrustDir60": {"segs":[[-19,-30,12],[-13,33,12]]},
+  "ShipDir64": {"segs":[[16,-24,0],[-32,0,12],[-16,-16,12],[32,96,12],[32,-96,12],[-16,16,12]]},
+  "ThrustDir64": {"segs":[[-16,-32,12],[-16,32,12]]},
+  "LifeShip": {"segs":[[-16,-24,0],[32,0,7],[16,-16,7],[-32,96,7],[-32,-96,7],[16,16,7],[80,24,0]]},
+  "char_A": {"segs":[[0,8,7],[4,4,7],[4,-4,7],[0,-8,7],[-8,4,0],[8,0,7],[4,-4,0]]},
+  "char_B": {"segs":[[0,12,7],[6,0,7],[2,-2,7],[0,-2,7],[-2,-2,7],[-6,0,7],[6,0,0],[2,-2,7],[0,-2,7],[-2,-2,7],[-6,0,7],[12,0,0]]},
+  "char_C": {"segs":[[0,12,7],[8,0,7],[-8,-12,0],[8,0,7],[4,0,0]]},
+  "char_D": {"segs":[[0,12,7],[4,0,7],[4,-4,7],[0,-4,7],[-4,-4,7],[-4,0,7],[12,0,0]]},
+  "char_E": {"segs":[[0,12,7],[8,0,7],[-2,-6,0],[-6,0,7],[0,-6,0],[8,0,7],[4,0,0]]},
+  "char_F": {"segs":[[0,12,7],[8,0,7],[-2,-6,0],[-6,0,7],[0,-6,0],[12,0,0]]},
+  "char_G": {"segs":[[0,12,7],[8,0,7],[0,-4,7],[-4,-4,0],[4,0,7],[0,-4,7],[-8,0,7],[12,0,0]]},
+  "char_H": {"segs":[[0,12,7],[0,-6,0],[8,0,7],[0,6,0],[0,-12,7],[4,0,0]]},
+  "char_I": {"segs":[[8,0,7],[-4,0,0],[0,12,7],[4,0,0],[-8,0,7],[12,-12,0]]},
+  "char_J": {"segs":[[0,4,0],[4,-4,7],[4,0,7],[0,12,7],[4,-12,0]]},
+  "char_K": {"segs":[[0,12,7],[6,0,0],[-6,-6,7],[6,-6,7],[6,0,0]]},
+  "char_L": {"segs":[[0,12,0],[0,-12,7],[8,0,7],[4,0,0]]},
+  "char_M": {"segs":[[0,12,7],[4,-4,7],[4,4,7],[0,-12,7],[4,0,0]]},
+  "char_N": {"segs":[[0,12,7],[8,-12,7],[0,12,7],[4,-12,0]]},
+  "char_O": {"segs":[[0,12,7],[8,0,7],[0,-12,7],[-8,0,7],[12,0,0]]},
+  "char_P": {"segs":[[0,12,7],[8,0,7],[0,-6,7],[-8,0,7],[6,-6,0],[6,0,0]]},
+  "char_Q": {"segs":[[0,12,7],[8,0,7],[0,-8,7],[-4,-4,7],[-4,0,7],[4,4,0],[4,-4,7],[4,0,0]]},
+  "char_R": {"segs":[[0,12,7],[8,0,7],[0,-6,7],[-8,0,7],[2,0,0],[6,-6,7],[4,0,0]]},
+  "char_S": {"segs":[[8,0,7],[0,6,7],[-8,0,7],[0,6,7],[8,0,7],[4,-12,0]]},
+  "char_T": {"segs":[[4,0,0],[0,12,7],[-4,0,0],[8,0,7],[4,-12,0]]},
+  "char_U": {"segs":[[0,12,0],[0,-12,7],[8,0,7],[0,12,7],[4,-12,0]]},
+  "char_V": {"segs":[[0,12,0],[4,-12,7],[4,12,7],[4,-12,0]]},
+  "char_W": {"segs":[[0,12,0],[0,-12,7],[4,4,7],[4,-4,7],[0,12,7],[4,-12,0]]},
+  "char_X": {"segs":[[8,12,7],[-8,0,0],[8,-12,7],[4,0,0]]},
+  "char_Y": {"segs":[[4,0,0],[0,8,7],[-4,4,7],[8,0,0],[-4,-4,7],[8,-8,0]]},
+  "char_Z": {"segs":[[0,12,0],[8,0,7],[-8,-12,7],[8,0,7],[4,0,0]]},
+  "char_ ": {"segs":[[12,0,0]]},
+  "char_1": {"segs":[[4,0,0],[0,12,7],[8,-12,0]]},
+  "char_2": {"segs":[[0,12,0],[8,0,7],[0,-6,7],[-8,0,7],[0,-6,7],[8,0,7],[4,0,0]]},
+  "char_3": {"segs":[[8,0,7],[0,12,7],[-8,0,7],[0,-6,0],[8,0,7],[4,-6,0]]},
+  "char_4": {"segs":[[0,12,0],[0,-6,7],[8,0,7],[0,6,0],[0,-12,7],[4,0,0]]},
+  "char_5": {"segs":[[8,0,7],[0,6,7],[-8,0,7],[0,6,7],[8,0,7],[4,-12,0]]},
+  "char_6": {"segs":[[0,6,0],[8,0,7],[0,-6,7],[-8,0,7],[0,12,7],[12,-12,0]]},
+  "char_7": {"segs":[[0,12,0],[8,0,7],[0,-12,7],[4,0,0]]},
+  "char_8": {"segs":[[8,0,7],[0,12,7],[-8,0,7],[0,-12,7],[0,6,0],[8,0,7],[4,-6,0]]},
+  "char_9": {"segs":[[8,0,0],[0,12,7],[-8,0,7],[0,-6,7],[8,0,7],[4,-6,0]]}
+};
+
+/* Sine quarter-wave used for thrust and shot velocities (ROM $57B9,
+   65 entries, index 0..64 = 0..90 degrees, 127 = full). */
+const THRUST_TBL = [
+  0x00,0x03,0x06,0x09,0x0C,0x10,0x13,0x16,0x19,0x1C,0x1F,0x22,0x25,0x28,0x2B,0x2E,
+  0x31,0x33,0x36,0x39,0x3C,0x3F,0x41,0x44,0x47,0x49,0x4C,0x4E,0x51,0x53,0x55,0x58,
+  0x5A,0x5C,0x5E,0x60,0x62,0x64,0x66,0x68,0x6A,0x6B,0x6D,0x6F,0x70,0x71,0x73,0x74,
+  0x75,0x76,0x78,0x79,0x7A,0x7A,0x7B,0x7C,0x7D,0x7D,0x7E,0x7E,0x7E,0x7F,0x7F,0x7F,0x7F
+];
+
+/* CalcThrustDir ($77D5): signed Y component of a direction byte.
+   Direction 0 = right, 64 = up, 128 = left, 192 = down (256 steps). */
+function velY(dir) {
+  dir &= 255;
+  let a = dir & 127;
+  if (a >= 0x41) a = (a ^ 0x7f) + 1;
+  const v = THRUST_TBL[a];
+  return dir < 128 ? v : -v;
+}
+/* CalcXThrust ($77D2): the X component is the same table 64 steps on. */
+function velX(dir) { return velY(dir + 64); }
+
+/* ------------------------------------------------------------------ *
+ * The ROM's random number generator ($77B5): a 16-bit shift register
+ * with a couple of quirks.  Reproduced so the tests can seed it.
+ * ------------------------------------------------------------------ */
+let rngLo = 0x5A, rngHi = 0x3C;
+function seedRng(lo, hi) { rngLo = lo & 255; rngHi = hi & 255; if (!(rngLo | rngHi)) rngLo = 1; }
+function rnd() {
+  const v = ((rngHi << 8) | rngLo) << 1;
+  rngLo = v & 255; rngHi = (v >> 8) & 255;
+  if (rngHi & 0x80) rngLo = (rngLo + 1) & 255;
+  if (rngLo & 0x02) rngLo ^= 1;
+  if ((rngLo | rngHi) === 0) rngLo = 1;
+  return rngLo;
+}
+function s8(v) { v &= 255; return v < 128 ? v : v - 256; }   // byte -> signed
+
+/* ------------------------------------------------------------------ *
+ * Difficulty settings.  "original" is the arcade at its default DIP
+ * switches (3 ships, extra ship every 10,000).  Every knob is a
+ * multiplier or count on top of the arcade value; at the original
+ * preset the game is the machine.
+ * ------------------------------------------------------------------ */
+const KNOBS = [
+  { key: 'astSpeed',   name: 'ASTEROID SPEED',   min: 25, max: 200, step: 5,  fmt: v => v + '%' },
+  { key: 'startAst',   name: 'STARTING ROCKS',   min: 1,  max: 11,  step: 1,  fmt: v => String(v) },
+  { key: 'saucerFreq', name: 'SAUCER FREQUENCY', min: 0,  max: 200, step: 10, fmt: v => v ? v + '%' : 'NEVER' },
+  { key: 'saucerAim',  name: 'SAUCER ACCURACY',  min: 0,  max: 100, step: 10, fmt: v => v + '%' },
+  { key: 'drag',       name: 'SHIP DRAG',        min: 1,  max: 10,  step: 1,  fmt: v => v === 1 ? '1 (ARCADE)' : String(v) },
+  { key: 'lives',      name: 'SHIPS',            min: 1,  max: 9,   step: 1,  fmt: v => String(v) },
+  { key: 'extraLife',  name: 'EXTRA SHIP EVERY', values: [0, 5000, 10000, 20000], fmt: v => v ? String(v) : 'NEVER' },
+  { key: 'safeHyper',  name: 'SAFE HYPERSPACE',  values: [0, 1], fmt: v => v ? 'ON' : 'OFF' }
+];
+const PRESETS = {
+  kid:      { astSpeed: 45,  startAst: 2, saucerFreq: 25,  saucerAim: 20,  drag: 8, lives: 9, extraLife: 5000,  safeHyper: 1 },
+  easy:     { astSpeed: 75,  startAst: 3, saucerFreq: 60,  saucerAim: 50,  drag: 3, lives: 5, extraLife: 5000,  safeHyper: 1 },
+  normal:   { astSpeed: 100, startAst: 4, saucerFreq: 100, saucerAim: 80,  drag: 1, lives: 4, extraLife: 10000, safeHyper: 0 },
+  original: { astSpeed: 100, startAst: 4, saucerFreq: 100, saucerAim: 100, drag: 1, lives: 3, extraLife: 10000, safeHyper: 0 }
+};
+const PRESET_ORDER = ['kid', 'easy', 'normal', 'original'];
+const PRESET_BLURB = {
+  kid: 'SLOW ROCKS, A STICKY SHIP, NINE LIVES',
+  easy: 'GENTLE ROCKS, RARE SAUCERS, SAFE HYPERSPACE',
+  normal: 'THE ARCADE WITH ONE EXTRA SHIP AND A SLOPPIER SAUCER',
+  original: 'THE 1979 MACHINE AT ITS DEFAULT DIP SWITCHES',
+  custom: 'YOUR OWN MIX'
+};
+
+const settings = { preset: 'normal', knobs: Object.assign({}, PRESETS.normal), invuln: false };
+const highs = {};   // key: preset or preset+'.inv' -> score
+
+function presetFor(knobs) {
+  for (const p of PRESET_ORDER) {
+    if (KNOBS.every(k => PRESETS[p][k.key] === knobs[k.key])) return p;
+  }
+  return 'custom';
+}
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('asteroids.settings') || 'null');
+    if (s && s.knobs) {
+      for (const k of KNOBS) {
+        const v = s.knobs[k.key];
+        if (typeof v === 'number' && (k.values ? k.values.includes(v) : (v >= k.min && v <= k.max))) settings.knobs[k.key] = v;
+      }
+      settings.invuln = !!s.invuln;
+    }
+  } catch (e) {}
+  settings.preset = presetFor(settings.knobs);
+  try {
+    const h = JSON.parse(localStorage.getItem('asteroids.high') || 'null');
+    if (h && typeof h === 'object') for (const k in h) if (typeof h[k] === 'number') highs[k] = h[k];
+  } catch (e) {}
+}
+function saveSettings() {
+  try { localStorage.setItem('asteroids.settings', JSON.stringify({ knobs: settings.knobs, invuln: settings.invuln })); } catch (e) {}
+}
+function highKey() { return settings.preset + (settings.invuln ? '.inv' : ''); }
+function currentHigh() { return highs[highKey()] || 0; }
+function recordHigh(score) {
+  const k = highKey();
+  if (score > (highs[k] || 0)) {
+    highs[k] = score;
+    try { localStorage.setItem('asteroids.high', JSON.stringify(highs)); } catch (e) {}
+    return true;
+  }
+  return false;
+}
+function applyPreset(name) {
+  if (!PRESETS[name]) return;
+  Object.assign(settings.knobs, PRESETS[name]);
+  settings.preset = name;
+  saveSettings();
+}
+function setKnob(key, value) {
+  const k = KNOBS.find(x => x.key === key);
+  if (!k) return;
+  if (k.values) { if (!k.values.includes(value)) return; }
+  else value = Math.max(k.min, Math.min(k.max, value));
+  settings.knobs[key] = value;
+  settings.preset = presetFor(settings.knobs);
+  saveSettings();
+}
+function stepKnob(key, dir) {
+  const k = KNOBS.find(x => x.key === key);
+  const cur = settings.knobs[key];
+  if (k.values) {
+    const i = Math.max(0, Math.min(k.values.length - 1, k.values.indexOf(cur) + dir));
+    setKnob(key, k.values[i]);
+  } else setKnob(key, cur + dir * k.step);
+}
+function setInvuln(on) { settings.invuln = !!on; saveSettings(); }
+
+/* ------------------------------------------------------------------ *
+ * Sound.  The arcade had no sound chip - seven analogue circuits (555
+ * VCOs, a 566, an LFSR noise source).  Each is approximated with
+ * WebAudio using the component values from MAME's discrete netlist
+ * (audio/asteroid.cpp).  Nothing is loaded from disk.
+ * ------------------------------------------------------------------ */
+const Sound = (function () {
+  let ac = null, master = null, noiseBuf = null;
+  let muted = false;
+  let thrustNodes = null, saucerNodes = null, explNodes = null, lifeNodes = null;
+
+  function ensure() {
+    if (!ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ac = new AC();
+      master = ac.createGain();
+      master.gain.value = 0.35;
+      master.connect(ac.destination);
+      noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (ac.state === 'suspended') ac.resume();
+    return true;
+  }
+  function noiseSource() {
+    const n = ac.createBufferSource();
+    n.buffer = noiseBuf; n.loop = true;
+    return n;
+  }
+  function stopNodes(n) {
+    if (!n) return;
+    try { n.gain.gain.cancelScheduledValues(ac.currentTime); n.gain.gain.setTargetAtTime(0, ac.currentTime, 0.01); } catch (e) {}
+    for (const s of n.srcs) { try { s.stop(ac.currentTime + 0.05); } catch (e) {} }
+  }
+
+  return {
+    get muted() { return muted; },
+    toggle() { muted = !muted; if (muted) { this.thrust(false); this.saucer(0); } return muted; },
+    unlock() { ensure(); },
+
+    /* 555 VCO "thump": two alternating low tones, 4 frames each.  The
+       exact pitches of the real DAC/555 pair are not documented, so
+       these are tuned by ear to the familiar heartbeat. */
+    thump(high) {
+      if (muted || !ensure()) return;
+      const t0 = ac.currentTime, f = high ? 76 : 57;
+      const o = ac.createOscillator(), g = ac.createGain(), lp = ac.createBiquadFilter();
+      o.type = 'square'; o.frequency.value = f;
+      lp.type = 'lowpass'; lp.frequency.value = 480;
+      g.gain.setValueAtTime(0.9, t0);
+      g.gain.setValueAtTime(0.9, t0 + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.11);
+      o.connect(lp); lp.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0 + 0.12);
+    },
+
+    /* Ship fire: square VCO sweeping 820 -> 110 Hz over 0.28 s, amplitude
+       decaying with an 81 ms RC.  Saucer fire: 830 -> 630 Hz, 0.3 s RC. */
+    fire(saucer) {
+      if (muted || !ensure()) return;
+      const t0 = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(saucer ? 830 : 820, t0);
+      o.frequency.linearRampToValueAtTime(saucer ? 630 : 110, t0 + 0.28);
+      g.gain.setValueAtTime(saucer ? 0.28 : 0.32, t0);
+      g.gain.setTargetAtTime(0.03, t0, saucer ? 0.3 : 0.081);
+      g.gain.setValueAtTime(0, t0 + 0.27);
+      o.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0 + 0.28);
+    },
+
+    /* Thrust: LFSR noise -> 72 Hz RC low-pass -> 89.5 Hz band-pass (Q 7.6)
+       -> 160 Hz low-pass.  A deep rumble. */
+    thrust(on) {
+      if (on) {
+        if (thrustNodes || muted || !ensure()) return;
+        const src = noiseSource(), bp = ac.createBiquadFilter(), lp = ac.createBiquadFilter(), g = ac.createGain();
+        bp.type = 'bandpass'; bp.frequency.value = 89.5; bp.Q.value = 7.6;
+        lp.type = 'lowpass'; lp.frequency.value = 160;
+        g.gain.setValueAtTime(0, ac.currentTime);
+        g.gain.linearRampToValueAtTime(2.2, ac.currentTime + 0.03);
+        src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(master);
+        src.start();
+        thrustNodes = { srcs: [src], gain: g };
+      } else if (thrustNodes) { stopNodes(thrustNodes); thrustNodes = null; }
+    },
+
+    /* Saucer: a 566 VCO warbled by a slow 555.  Small saucer 750-1670 Hz
+       at 8.25 Hz, large saucer 500-1420 Hz at 5.75 Hz (MAME netlist). */
+    saucer(size) {
+      if (saucerNodes && saucerNodes.size === size) return;
+      if (saucerNodes) { stopNodes(saucerNodes); saucerNodes = null; }
+      if (!size || muted || !ensure()) return;
+      const large = size === 2;
+      const o = ac.createOscillator(), g = ac.createGain();
+      const lfo = ac.createOscillator(), lfoG = ac.createGain();
+      o.type = 'triangle'; o.frequency.value = (large ? 500 : 750) + 460;
+      lfo.type = 'triangle'; lfo.frequency.value = large ? 5.75 : 8.25;
+      lfoG.gain.value = 460;
+      lfo.connect(lfoG); lfoG.connect(o.frequency);
+      g.gain.setValueAtTime(0, ac.currentTime);
+      g.gain.linearRampToValueAtTime(0.16, ac.currentTime + 0.02);
+      o.connect(g); g.connect(master);
+      o.start(); lfo.start();
+      saucerNodes = { srcs: [o, lfo], gain: g, size };
+    },
+
+    /* Explosion: noise sampled at 12 kHz / divider (code 0 -> 1 kHz,
+       2 -> 4 kHz, 3 -> 2.4 kHz, 1 -> 2 kHz), volume stepping down
+       15..0 over 63 frames, through a 52 Hz RC low-pass. */
+    explode(code) {
+      if (muted || !ensure()) return;
+      if (explNodes) { stopNodes(explNodes); explNodes = null; }
+      const div = [12, 6, 3, 5][code & 3];
+      const rate = 12000 / div, sr = ac.sampleRate, hold = Math.max(1, Math.round(sr / rate));
+      const len = Math.floor(sr * 1.1);
+      const buf = ac.createBuffer(1, len, sr), d = buf.getChannelData(0);
+      let v = 0;
+      for (let i = 0; i < len; i++) { if (i % hold === 0) v = Math.random() * 2 - 1; d[i] = v; }
+      const src = ac.createBufferSource(); src.buffer = buf;
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 52; lp.Q.value = 0.7;
+      const g = ac.createGain();
+      const t0 = ac.currentTime;
+      g.gain.setValueAtTime(0, t0);
+      for (let step = 15; step >= 0; step--) {
+        g.gain.setValueAtTime(step / 15 * 7.5, t0 + (15 - step) * 4 / FPS);
+      }
+      src.connect(lp); lp.connect(g); g.connect(master);
+      src.start(t0); src.stop(t0 + 1.1);
+      explNodes = { srcs: [src], gain: g };
+    },
+
+    /* Extra ship: a 3 kHz tone gated 8 frames on / 8 off while the
+       ROM's timer runs down (about 5.9 s). */
+    extraLife() {
+      if (muted || !ensure()) return;
+      if (lifeNodes) { stopNodes(lifeNodes); lifeNodes = null; }
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square'; o.frequency.value = 3000;
+      const t0 = ac.currentTime, total = 352 / FPS;
+      g.gain.setValueAtTime(0, t0);
+      for (let t = 0; t < total; t += 16 / FPS) {
+        g.gain.setValueAtTime(0.12, t0 + t);
+        g.gain.setValueAtTime(0, t0 + t + 8 / FPS);
+      }
+      o.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0 + total + 0.05);
+      lifeNodes = { srcs: [o], gain: g };
+    },
+
+    silence() { this.thrust(false); this.saucer(0); if (explNodes) { stopNodes(explNodes); explNodes = null; } if (lifeNodes) { stopNodes(lifeNodes); lifeNodes = null; } }
+  };
+})();
+
+/* ------------------------------------------------------------------ *
+ * Game state.  Field names follow the ROM's RAM labels where it helps
+ * to cross-reference the disassembly.
+ * ------------------------------------------------------------------ */
+const EXPLODE_START = 0xA0;      // object status while exploding counts 0xA0 -> 0x100
+const MAX_ASTEROIDS = 27;        // 27 slots (the arcade's "maximum of 27")
+const SHOT_LIFE = 18;            // decremented every 4th frame -> ~72 frames
+const SHIP_SHOTS = 4, SAUCER_SHOTS = 2;
+const ROT_STEP = 3;              // direction units per frame (256 per turn)
+const AST_POINTS = { 4: 20, 2: 50, 1: 100 };   // large / medium / small
+const SAUCER_POINTS = { 2: 200, 1: 1000 };     // large / small
+const HITBOX = { 1: 42, 2: 72, 4: 132 };       // asteroid size -> box (1/4 px units)
+
+const game = {
+  state: 'menu',          // menu | play | gameover
+  paused: false,
+  frame: 0,               // FrameTimer (16 bit)
+  score: 0, high: 0,
+  lives: 0,               // Plyr1Ships: ships left INCLUDING the one in play
+  ship: null,
+  asteroids: [],
+  saucer: null,
+  shipShots: [],
+  saucerShots: [],
+  astPerWave: 2, curAsteroids: 0, wave: 0,
+  scrTimer: 0, scrReload: 0x92, scrSpeedup: 5, astBreakTimer: 0,
+  thumpSpeedTmr: 0, thumpOffReload: 0x30, thumpOffTime: 4, thumpOnTime: 0, thumpHigh: false,
+  playerDispTimer: 0, gameOverTimer: 0,
+  fireSR: 0, hyperWasDown: false,
+  input: { left: false, right: false, thrust: false, fire: false, hyper: false },
+  flash: 0, invulnHits: 0,
+  exlfTimer: 0,
+  newBest: false
+};
+
+function makeShip() {
+  return { status: 0, x: FW / 2, y: FH / 2, dir: 64, vx: 0, vy: 0, spawnTimer: 1, hyperFlag: 0, explT: 0 };
+}
+function wrapX(v) { v %= FW; return v < 0 ? v + FW : v; }
+function wrapY(v) { v %= FH; return v < 0 ? v + FH : v; }
+function k() { return settings.knobs; }
+
+/* ---- scoring ---- */
+function addScore(points) {
+  const before = game.score;
+  game.score = (game.score + points) % 100000;          // 4 BCD digits + fixed trailing 0
+  const every = k().extraLife;
+  if (!every) return;
+  const crossed = game.score < before ? true : Math.floor(game.score / every) > Math.floor(before / every);
+  if (crossed) { game.lives++; game.exlfTimer = 0xB0; Sound.extraLife(); }
+}
+
+/* ---- asteroids ---- */
+/* SetAstVel ($7203): new component = parent component + random(-16..15),
+   magnitude clamped to 6..31 (1/8 px per frame).  The knob scales it. */
+function astVelComponent(parent) {
+  let r = rnd() & 0x8f;
+  if (r & 0x80) r |= 0xf0;
+  let v = s8(parent) + s8(r);
+  if (v < 0) { if (v < -31) v = -31; if (v > -6) v = -6; }
+  else { if (v < 6) v = 6; if (v > 31) v = 31; }
+  return v;
+}
+function setAstVel(a, pvx, pvy) {
+  a.rvx = astVelComponent(pvx);
+  rnd(); rnd(); rnd();
+  a.rvy = astVelComponent(pvy);
+}
+function astSpeedMul() { return k().astSpeed / 100; }
+
+function spawnWaveAsteroids(count) {
+  for (let i = 0; i < count; i++) {
+    const a = { size: 4, type: (rnd() & 0x18) >> 3, status: 1, x: 0, y: 0, rvx: 0, rvy: 0 };
+    setAstVel(a, 0, 0);
+    let r = rnd();
+    const carry = r & 1;
+    r = (r >> 1) & 0x1f;
+    if (carry) { if (r >= 0x18) r &= 0x17; a.y = r * 256; a.x = 0; }      // left/right edge
+    else { a.x = r * 256; a.y = 0; }                                       // top/bottom edge
+    game.asteroids.push(a);
+  }
+}
+
+/* InitWaveVars ($7168) */
+function startWave() {
+  if (game.saucer) return false;                       // the arcade waits for the saucer to leave
+  game.scrSpeedup = Math.min(11, game.scrSpeedup + 1);
+  game.astPerWave = Math.min(11, game.astPerWave + 2);
+  game.curAsteroids = game.astPerWave;
+  game.wave++;
+  game.asteroids = [];
+  spawnWaveAsteroids(game.astPerWave);
+  game.scrTimer = scaleTicks(0x7f);
+  game.thumpOffReload = 0x30;
+  return true;
+}
+
+/* BreakAsteroid ($75EC).  The hit rock shrinks in place and explodes;
+   up to two children copy its (new) size, position and velocity. */
+function breakAsteroid(a, scoreIt) {
+  game.astBreakTimer = 80;
+  const oldSize = a.size;
+  if (scoreIt) addScore(AST_POINTS[oldSize]);
+  const newSize = oldSize >> 1;
+  if (newSize) {
+    for (let c = 0; c < 2; c++) {
+      if (game.asteroids.length >= MAX_ASTEROIDS) break;
+      game.curAsteroids++;
+      const child = { size: newSize, type: (rnd() & 0x18) >> 3, status: 1, x: a.x, y: a.y, rvx: a.rvx, rvy: a.rvy };
+      setAstVel(child, a.rvx, a.rvy);
+      if (c === 0) child.x = wrapX((child.x & ~255) | ((child.x & 255) ^ (((child.rvx & 0x1f) << 1) & 255)));
+      else child.y = wrapY((child.y & ~255) | ((child.y & 255) ^ (((child.rvy & 0x1f) << 1) & 255)));
+      game.asteroids.push(child);
+    }
+  }
+  // explosion pitch is taken from the shrunken size (ObjHitSFX)
+  Sound.explode(explodeCode(newSize));
+  a.size = newSize;
+  a.status = EXPLODE_START;
+  a.rvx = 0; a.rvy = 0;
+}
+/* ObjHitSFX ($6B4A): explosion pitch code = (size & 3) ^ 2, taken from the
+   shrunken size - large rock 2 (4 kHz noise), medium 0 (1 kHz), small 3 (2.4 kHz). */
+function explodeCode(statusLow) { return (statusLow & 3) ^ 2; }
+
+/* ---- ship ---- */
+function centerShip() {
+  const s = game.ship;
+  s.x = 0x1060; s.y = 0x0C60; s.vx = 0; s.vy = 0;
+}
+function killShip() {
+  const s = game.ship;
+  s.status = EXPLODE_START; s.explT = 0;
+  s.vx = 0; s.vy = 0;
+  game.lives--;
+  s.spawnTimer = 0x81;
+  Sound.thrust(false);
+  Sound.explode(3);
+}
+function shipHitInvulnerable() {
+  game.flash = 40;
+  game.invulnHits++;
+}
+/* IsReturnSafe ($7139): nothing within 4 high-bytes (128 px) in x and y. */
+function isReturnSafe() {
+  const s = game.ship;
+  const objs = game.asteroids.slice();
+  if (game.saucer) objs.push(game.saucer);
+  for (const o of objs) {
+    const dx = ((o.x >> 8) - (s.x >> 8)) & 255, dy = ((o.y >> 8) - (s.y >> 8)) & 255;
+    if ((dx < 4 || dx >= 0xfc) && (dy < 4 || dy >= 0xfc)) return false;
+  }
+  return true;
+}
+
+/* EnterHyperspc ($6E74) */
+function enterHyperspace() {
+  const s = game.ship;
+  if (s.status !== 1 || s.spawnTimer) return;
+  s.status = 0; s.vx = 0; s.vy = 0; s.spawnTimer = 0x30;
+  Sound.thrust(false);
+  let x = rnd() & 0x1f; if (x >= 0x1d) x = 0x1c; if (x < 3) x = 3;
+  s.x = (x << 8) | (s.x & 255);
+  for (let i = 0; i < 5; i++) rnd();
+  let a = rngLo & 0x1f, flag = 1;
+  if (a >= 24) {
+    a = ((a & 7) << 1) + 4;
+    if (a >= game.curAsteroids) flag = 0x80;      // the arcade's small chance of destruction
+  }
+  if (k().safeHyper || settings.invuln) flag = 1;
+  if (a >= 0x15) a = 0x14; if (a < 3) a = 3;
+  s.y = (a << 8) | (s.y & 255);
+  s.hyperFlag = flag;
+}
+
+/* ChkExitHprspc ($703F): ship status machine + player input + thrust/decel */
+function updateShipStatus() {
+  const s = game.ship;
+  if (s.status & 0x80) return;                      // exploding
+  if (s.spawnTimer) {
+    s.spawnTimer--;
+    if (s.spawnTimer) return;
+    if (s.hyperFlag & 0x80) {                       // failed jump: re-enter exploding
+      s.status = EXPLODE_START; s.explT = 0;
+      game.lives--; s.spawnTimer = 0x81; s.hyperFlag = 0;
+      Sound.explode(3);
+      return;
+    }
+    if (s.hyperFlag === 1) { s.status = 1; s.hyperFlag = 0; return; }
+    if (!isReturnSafe()) { s.spawnTimer = 1; return; }
+    if (game.saucer) { s.spawnTimer = 2; return; }
+    s.status = 1;
+    return;
+  }
+  if (s.status !== 1) return;
+  const inp = game.input;
+  if (inp.left) s.dir = (s.dir + ROT_STEP) & 255;
+  else if (inp.right) s.dir = (s.dir - ROT_STEP) & 255;
+
+  if (game.frame & 1) return;                       // velocity is updated every other frame
+  if (inp.thrust) {
+    Sound.thrust(true);
+    s.vx = clampVel(s.vx + 2 * velX(s.dir));
+    s.vy = clampVel(s.vy + 2 * velY(s.dir));
+  } else {
+    Sound.thrust(false);
+    for (let i = 0; i < k().drag; i++) { s.vx = decel(s.vx); s.vy = decel(s.vy); }
+  }
+}
+/* Velocities are 8.8 fixed point: integer part -64..63 (1/8 px per frame), fraction below. */
+function clampVel(v) { return Math.max(-64 * 256 + 1, Math.min(63 * 256 + 255, v)); }
+/* ShipDecelerate ($70E1), exact: every other frame  V -= 2*int(V) + (V >= 0 ? 1 : 0) */
+function decel(v) {
+  if (v === 0) return 0;
+  const s = Math.floor(v / 256);
+  return s >= 0 ? v - (2 * s + 1) : v - 2 * s;
+}
+
+/* UpdateShip ($6CD7): fire button edge -> new shot if a slot is free */
+function updateShipFire() {
+  game.fireSR = ((game.input.fire ? 0x80 : 0) | (game.fireSR >> 1)) & 0xff;
+  if (!(game.fireSR & 0x80) || (game.fireSR & 0x40)) return;
+  const s = game.ship;
+  if (s.spawnTimer || s.status !== 1) return;
+  if (game.shipShots.length >= SHIP_SHOTS) return;
+  game.shipShots.push(makeShot(s.dir, s.x, s.y, Math.floor(s.vx / 256), Math.floor(s.vy / 256)));
+  Sound.fire(false);
+}
+/* BulletSlotFound ($6CFD): velocity = half the direction vector plus the
+   shooter's velocity, capped at 111; spawned 3/4 of a direction vector out. */
+function makeShot(dir, x, y, svx, svy) {
+  const cx = velX(dir), cy = velY(dir);
+  const hx = cx >= 0 ? cx >> 1 : -((-cx) >> 1), hy = cy >= 0 ? cy >> 1 : -((-cy) >> 1);
+  const vx = Math.max(-111, Math.min(111, hx + svx));
+  const vy = Math.max(-111, Math.min(111, hy + svy));
+  return { x: wrapX(x + hx + (hx >= 0 ? hx >> 1 : -((-hx) >> 1))), y: wrapY(y + hy + (hy >= 0 ? hy >> 1 : -((-hy) >> 1))), vx, vy, life: SHOT_LIFE };
+}
+
+/* ---- saucer ---- */
+function scaleTicks(n) { const f = k().saucerFreq; return f ? Math.round(n * 100 / f) : 0x7fffffff; }
+function saucerReloadTicks() { return scaleTicks(game.scrReload); }
+/* UpdateScr ($6B93): runs every 4th frame */
+function updateSaucer() {
+  if (game.frame & 3) return;
+  const sc = game.saucer, s = game.ship;
+  if (!sc) {
+    if (s.status !== 1) return;                    // timer pauses while the ship is dead or in hyperspace
+    if (game.astBreakTimer) game.astBreakTimer--;
+    if (!k().saucerFreq) return;
+    game.scrTimer--;
+    if (game.scrTimer > 0) return;
+    game.scrTimer = 1;
+    if (game.astBreakTimer) {
+      if (game.curAsteroids === 0) return;
+      if (game.curAsteroids >= game.scrSpeedup) return;
+    }
+    game.scrReload = Math.max(32, game.scrReload - 6);
+    spawnSaucer();
+    return;
+  }
+  if (sc.status & 0x80) return;
+  if ((game.frame & 0x7f) === 0) sc.vy = [-16, 0, 0, 16][rnd() & 3];
+  if (s.spawnTimer) return;                        // no shooting at a ship that is not there
+  game.scrTimer--;
+  if (game.scrTimer > 0) return;
+  game.scrTimer = 10;
+  saucerShoot();
+}
+function spawnSaucer() {
+  let r = rnd();
+  const lo = ((r & 7) << 5);
+  let hi = r >> 3; if (hi >= 0x18) hi &= 0x17;
+  const sc = { x: 0, y: (hi << 8) | lo, vx: 16, vy: 0, size: 2, status: 1 };
+  if (!(rngHi & 0x40)) { sc.x = 0x1fff; sc.vx = -16; }
+  if (game.scrReload >= 0x80) sc.size = 2;
+  else if (game.score >= 30000) sc.size = 1;
+  else { const q = rnd(); sc.size = (game.scrReload >> 1) >= q ? 2 : 1; }
+  game.saucer = sc;
+  Sound.saucer(sc.size);
+}
+/* Small-saucer aim ($6C65): lead by half the saucer velocity, aim
+   through the wrap when the ship is more than half a screen away,
+   then jitter +-16 units (+-8 above 35,000 points). */
+function saucerAimDir() {
+  const sc = game.saucer, s = game.ship;
+  function comp(shipP, scP, v) {
+    let d = (shipP - scP) | 0;
+    let a = s8(d >> 6);
+    a = s8(a - (v >> 1));
+    return a;
+  }
+  let ax = comp(s.x, sc.x, sc.vx);
+  if (ax >= 0x40 || ax < -0x40) ax = s8(~ax);        // more than half a screen away: aim through the wrap
+  const ay = comp(s.y, sc.y, sc.vy);
+  let dir = Math.round(Math.atan2(ay, ax) / (2 * Math.PI) * 256) & 255;
+  let r = rnd();
+  const close = game.score >= 35000;
+  r &= close ? 0x87 : 0x8f;
+  if (r & 0x80) r |= close ? 0x78 : 0x70;
+  let jitter = s8(r);
+  const extra = Math.round((100 - k().saucerAim) * 1.2);
+  if (extra) jitter += Math.round((rnd() / 255 * 2 - 1) * extra);
+  return (dir + jitter) & 255;
+}
+function saucerShoot() {
+  const sc = game.saucer;
+  if (game.saucerShots.length >= SAUCER_SHOTS) return;
+  const dir = sc.size === 2 ? rnd() : saucerAimDir();
+  game.saucerShots.push(makeShot(dir, sc.x, sc.y, sc.vx, sc.vy));
+  Sound.fire(true);
+}
+function saucerReset() {
+  game.saucer = null;
+  game.scrTimer = saucerReloadTicks();
+  Sound.saucer(0);
+}
+
+/* ---- per-frame movement, explosions, shot timers (UpdateObjects $6F57) ---- */
+function updateObjects() {
+  const mul = astSpeedMul();
+  for (let i = game.asteroids.length - 1; i >= 0; i--) {
+    const a = game.asteroids[i];
+    if (a.status & 0x80) {
+      a.status++;
+      if (a.status >= 0x100) {
+        game.asteroids.splice(i, 1);
+        game.curAsteroids--;
+        if (game.curAsteroids <= 0) { game.curAsteroids = 0; game.thumpSpeedTmr = 0x7f; }
+      }
+      continue;
+    }
+    a.x = wrapX(a.x + a.rvx * mul);
+    a.y = wrapY(a.y + a.rvy * mul);
+  }
+  const s = game.ship;
+  if (s.status & 0x80) {
+    s.explT++;
+    if (game.frame & 1) s.status++;              // ship explosion runs at half speed
+    if (s.status >= 0x100) {
+      s.status = 0; centerShip();
+      if (game.lives <= 0) { game.state = 'gameover'; game.gameOverTimer = 180; }
+    }
+  } else if (s.status === 1) {
+    s.x = wrapX(s.x + Math.floor(s.vx / 256));
+    s.y = wrapY(s.y + Math.floor(s.vy / 256));
+  }
+  const sc = game.saucer;
+  if (sc) {
+    if (sc.status & 0x80) {
+      sc.status++;
+      if (sc.status >= 0x100) saucerReset();
+    } else {
+      const nx = sc.x + sc.vx;
+      if (nx < 0 || nx >= FW) saucerReset();
+      else { sc.x = nx; sc.y = wrapY(sc.y + sc.vy); }
+    }
+  }
+  for (const list of [game.shipShots, game.saucerShots]) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      b.x = wrapX(b.x + b.vx); b.y = wrapY(b.y + b.vy);
+      if ((game.frame & 3) === 0 && --b.life <= 0) list.splice(i, 1);
+    }
+  }
+}
+
+/* ---- hit detection ($69F0) ---- */
+/* The arcade's test: |dx| and |dy| (in 1/4 px) both within the box and
+   |dx|+|dy| under 1.5 x box - a rounded diamond. */
+function hits(ax, ay, bx, by, box) {
+  let dx = Math.abs(ax - bx), dy = Math.abs(ay - by);   // no wrap: the arcade subtracts raw positions
+  if (dx >= 512 || dy >= 512) return false;
+  dx /= 2; dy /= 2;
+  if (dx > box || dy > box) return false;
+  return dx + dy < box + (box >> 1);
+}
+function saucerBox(extraPerSaucer) { return game.saucer.size === 2 ? extraPerSaucer * 2 : extraPerSaucer; }
+function hitDetection() {
+  const s = game.ship, inv = settings.invuln;
+  // ship vs asteroids (box = size + 28)
+  if (s.status === 1) {
+    for (const a of game.asteroids) {
+      if (a.status & 0x80) continue;
+      if (hits(a.x, a.y, s.x, s.y, HITBOX[a.size] + 28)) {
+        if (inv) { shipHitInvulnerable(); break; }
+        killShip();
+        breakAsteroid(a, true);                   // ramming a rock still scores (DoAstScore)
+        break;
+      }
+    }
+  }
+  // saucer vs ship and asteroids
+  const sc = game.saucer;
+  if (sc && !(sc.status & 0x80)) {
+    const extra = 18 + 1;                         // adc #18 with carry set
+    if (s.status === 1 && hits(s.x, s.y, sc.x, sc.y, 42 + (sc.size === 2 ? extra + 18 : extra))) {
+      if (inv) shipHitInvulnerable();
+      else {
+        killShip();
+        addScore(SAUCER_POINTS[sc.size]);
+        explodeSaucer();
+      }
+    } else {
+      for (const a of game.asteroids) {
+        if (a.status & 0x80) continue;
+        if (hits(a.x, a.y, sc.x, sc.y, HITBOX[a.size] + (sc.size === 2 ? extra + 18 : extra))) {
+          saucerReset();                          // ClearObjRAM: the saucer just vanishes
+          breakAsteroid(a, false);
+          break;
+        }
+      }
+    }
+  }
+  // saucer shots vs ship and asteroids
+  for (let i = game.saucerShots.length - 1; i >= 0; i--) {
+    const b = game.saucerShots[i];
+    let hit = false;
+    if (s.status === 1 && hits(s.x, s.y, b.x, b.y, 42)) {
+      hit = true;
+      if (inv) shipHitInvulnerable(); else killShip();
+    } else {
+      for (const a of game.asteroids) {
+        if (a.status & 0x80) continue;
+        if (hits(a.x, a.y, b.x, b.y, HITBOX[a.size])) { hit = true; breakAsteroid(a, false); break; }
+      }
+    }
+    if (hit) game.saucerShots.splice(i, 1);
+  }
+  // ship shots vs saucer, ship(!) and asteroids
+  for (let i = game.shipShots.length - 1; i >= 0; i--) {
+    const b = game.shipShots[i];
+    let hit = false;
+    if (game.saucer && !(game.saucer.status & 0x80) && hits(game.saucer.x, game.saucer.y, b.x, b.y, game.saucer.size === 2 ? 72 : 42)) {
+      hit = true;
+      addScore(SAUCER_POINTS[game.saucer.size]);
+      explodeSaucer();
+    } else if (s.status === 1 && hits(s.x, s.y, b.x, b.y, 42)) {
+      hit = true;
+      if (inv) shipHitInvulnerable(); else killShip();
+    } else {
+      for (const a of game.asteroids) {
+        if (a.status & 0x80) continue;
+        if (hits(a.x, a.y, b.x, b.y, HITBOX[a.size])) { hit = true; breakAsteroid(a, true); break; }
+      }
+    }
+    if (hit) game.shipShots.splice(i, 1);
+  }
+}
+function explodeSaucer() {
+  const sc = game.saucer;
+  Sound.explode(explodeCode(sc.size));
+  sc.status = EXPLODE_START; sc.vx = 0; sc.vy = 0;
+  game.scrTimer = saucerReloadTicks();
+  Sound.saucer(0);
+}
+
+/* ---- thump (heartbeat) and timers (ChkUpdateSFX $7555, ChkThmpFaster $6960) ---- */
+function updateThump() {
+  const s = game.ship;
+  const active = game.curAsteroids > 0 && !(s.status & 0x80) && (s.status === 1 || s.hyperFlag);
+  if (!active) { game.thumpOnTime = 0; game.thumpOffTime = game.thumpOffReload; return; }
+  if (game.thumpOnTime) {
+    if (--game.thumpOnTime === 0) game.thumpOffTime = game.thumpOffReload;
+    return;
+  }
+  if (--game.thumpOffTime <= 0) {
+    game.thumpOnTime = 4;
+    game.thumpHigh = !game.thumpHigh;
+    Sound.thump(game.thumpHigh);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Game set-up and the per-frame update (GameRunningLoop $680C order)
+ * ------------------------------------------------------------------ */
+function newGame() {
+  game.state = 'play';
+  game.paused = false;
+  game.frame = 0;
+  game.score = 0;
+  game.high = currentHigh();
+  game.newBest = false;
+  game.lives = k().lives;
+  game.ship = makeShip();
+  centerShip();
+  game.asteroids = []; game.saucer = null; game.shipShots = []; game.saucerShots = [];
+  game.astPerWave = Math.max(1, k().startAst) - 2;
+  game.curAsteroids = 0; game.wave = 0;
+  game.scrReload = 0x92;
+  game.scrTimer = saucerReloadTicks();
+  game.scrSpeedup = 5;
+  game.astBreakTimer = 0;
+  game.thumpSpeedTmr = 0x7f;
+  game.thumpOffReload = 0x30; game.thumpOffTime = 4; game.thumpOnTime = 0; game.thumpHigh = false;
+  game.playerDispTimer = 0x80;
+  game.gameOverTimer = 0;
+  game.fireSR = 0;
+  game.flash = 0; game.invulnHits = 0;
+  Sound.silence();
+}
+
+/* The menu backdrop is the arcade's attract mode: rocks drifting with no ship. */
+function demoField() {
+  game.state = 'menu';
+  game.frame = 0;
+  game.score = 0;
+  game.high = currentHigh();
+  game.lives = 0;
+  game.ship = makeShip(); game.ship.status = 0; game.ship.spawnTimer = 0;
+  game.saucer = null; game.shipShots = []; game.saucerShots = [];
+  game.asteroids = [];
+  game.astPerWave = 4; game.curAsteroids = 6; game.wave = 1;
+  spawnWaveAsteroids(6);
+  game.playerDispTimer = 0;
+}
+
+function update() {
+  if (game.paused) return;
+  game.frame = (game.frame + 1) & 0xffff;
+  if (game.flash) game.flash--;
+  if (game.state === 'menu') {
+    updateObjects();
+    if (game.curAsteroids === 0) { game.curAsteroids = 6; spawnWaveAsteroids(6); }
+    return;
+  }
+  if (game.state === 'gameover') {
+    updateObjects();
+    if (game.gameOverTimer > 0) game.gameOverTimer--;
+    return;
+  }
+  // play
+  if (game.playerDispTimer) game.playerDispTimer--;
+  else {
+    if ((game.frame & 0x3f) === 0 && game.thumpOffReload > 8) game.thumpOffReload--;
+    updateShipFire();
+    if (game.input.hyper && !game.hyperWasDown) enterHyperspace();
+    game.hyperWasDown = game.input.hyper;
+    updateShipStatus();
+    updateSaucer();
+  }
+  updateObjects();
+  hitDetection();
+  updateThump();
+  if (game.thumpSpeedTmr) game.thumpSpeedTmr--;
+  if (game.thumpSpeedTmr === 0 && game.curAsteroids === 0) startWave();
+  if (game.state === 'gameover') { recordHigh(game.score); Sound.silence(); }
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering - the vector monitor.  Every stroke is drawn twice: a wide
+ * faint additive pass for the phosphor glow, then a thin bright core.
+ * Dots (shots, shrapnel) get a brighter halo because the beam dwells.
+ * Canvas y grows down, DVG y grows up, so dy is negated here.
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+let S = 1;   // canvas pixels per logical pixel
+
+function cvX(dvgX) { return dvgX - VIEW_X0; }
+function cvY(dvgY) { return VIEW_YTOP - dvgY; }
+function objX(x) { return cvX(x / 8); }              // field units -> canvas
+function objY(y) { return cvY(y / 8 + 128); }
+
+let pass = 0;   // 0 = glow, 1 = core
+function strokeStyleFor(bri) {
+  const b = Math.min(15, bri) / 15;
+  if (pass === 0) return 'rgba(130,180,255,' + (0.10 + 0.12 * b).toFixed(3) + ')';
+  return 'rgba(' + Math.round(200 + 55 * b) + ',' + Math.round(225 + 30 * b) + ',255,' + (0.55 + 0.45 * b).toFixed(3) + ')';
+}
+function lineWidthFor(bri) { return pass === 0 ? 5.5 : (bri >= 11 ? 1.7 : 1.4); }
+
+/* Draw a shape's segments from pen (px, py).  Returns the final pen. */
+function drawSegs(segs, px, py, mul, fx, fy, briMul) {
+  let x = px, y = py;
+  for (const seg of segs) {
+    const nx = x + seg[0] * mul * fx, ny = y - seg[1] * mul * fy;
+    const bri = seg[2] * (briMul || 1);
+    if (bri > 0) {
+      if (seg[0] === 0 && seg[1] === 0) dot(nx, ny, bri);
+      else {
+        ctx.strokeStyle = strokeStyleFor(bri);
+        ctx.lineWidth = lineWidthFor(bri);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+      }
+    }
+    x = nx; y = ny;
+  }
+  return [x, y];
+}
+function dot(x, y, bri) {
+  const b = Math.min(15, bri) / 15;
+  if (pass === 0) {
+    ctx.fillStyle = 'rgba(140,190,255,' + (0.14 + 0.16 * b).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.7 + 0.3 * b).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function drawShape(name, cx, cy, mul, fx, fy) { return drawSegs(SHAPES[name].segs, cx, cy, mul, fx || 1, fy || 1); }
+
+/* Text with the ROM font.  Each glyph ends with its own blank advance. */
+function drawText(str, cx, cy, mul) {
+  let x = cx, y = cy;
+  for (const ch of String(str).toUpperCase()) {
+    let key = 'char_' + (ch === '0' ? 'O' : ch);
+    if (!SHAPES[key]) key = 'char_ ';
+    [x, y] = drawSegs(SHAPES[key].segs, x, y, mul, 1, 1);
+  }
+  return x;
+}
+/* Score the way the arcade draws it: four digits with leading zeros
+   blanked (and not advanced), then a fixed trailing zero. */
+function scoreString(v) {
+  const s = String(Math.floor((v % 100000) / 10));
+  return s === '0' ? '0' + '0' : s + '0';
+}
+
+/* UpdateShipDraw ($750B): fold the 256-step direction into one of 17
+   pre-rotated ROM ships plus x/y mirroring. */
+function shipPattern(dir) {
+  dir &= 255;
+  let fy = 1, fx = 1, d = dir;
+  if (d >= 128) { fy = -1; d = (256 - d) & 255; }
+  if (d > 64) { fx = -1; d = 128 - d; }
+  return { idx: d >> 2, fx, fy };
+}
+function drawShip(s, flameOn) {
+  const p = shipPattern(s.dir);
+  const cx = objX(s.x), cy = objY(s.y);
+  const pen = drawSegs(SHAPES['ShipDir' + p.idx * 4].segs, cx, cy, 0.25, p.fx, p.fy);
+  if (flameOn) drawSegs(SHAPES['ThrustDir' + p.idx * 4].segs, pen[0], pen[1], 0.25, p.fx, p.fy);
+}
+/* DoShipExplsn ($7465): six fragments drifting apart, vanishing one by
+   one every 32 frames (the ship counter steps every other frame). */
+function drawShipExplosion(cx, cy, status, t) {
+  const pieces = (((~status) & 0x70) >> 4) + 1;
+  const vel = SHAPES.ShipExplosionVel.segs, segs = SHAPES.ShipExplosion.segs;
+  for (let i = 0; i < pieces && i < 6; i++) {
+    const v = vel[i];
+    const ox = Math.trunc(v[0] * t / 256 + (v[0] >= 0 ? 0 : -1)), oy = Math.trunc(v[1] * t / 256 + (v[1] >= 0 ? 0 : -1));
+    drawSegs([segs[i]], cx + ox, cy - oy, 1, 1, 1);
+  }
+}
+/* Shrapnel: pattern (status & 0x0c) >> 2 at DVG scale (status & 0xf0) + 0x10. */
+function drawShrapnel(cx, cy, status) {
+  const pat = ((status & 0x0c) >> 2) + 1;           // jump table order: 4 (smallest) .. 1
+  const name = 'Shrapnel' + (5 - pat);
+  const mul = dvgScale(((status & 0xf0) + 0x10) >> 4);
+  drawSegs(SHAPES[name].segs, cx, cy, mul, 1, 1);
+}
+
+function drawField() {
+  for (const a of game.asteroids) {
+    const cx = objX(a.x), cy = objY(a.y);
+    if (a.status & 0x80) drawShrapnel(cx, cy, a.status);
+    else drawShape('Rock' + (a.type + 1), cx, cy, a.size === 4 ? 1 : a.size === 2 ? 0.5 : 0.25);
+  }
+  const sc = game.saucer;
+  if (sc) {
+    const cx = objX(sc.x), cy = objY(sc.y);
+    if (sc.status & 0x80) drawShrapnel(cx, cy, sc.status);
+    else drawShape('Saucer', cx, cy, sc.size === 2 ? 0.5 : 0.25);
+  }
+  const s = game.ship;
+  if (game.state !== 'menu' && s) {
+    if (s.status === 1) {
+      drawShip(s, game.input.thrust && (game.frame & 4) !== 0 && !game.paused);
+      if (game.flash) drawShipExplosion(objX(s.x), objY(s.y), 0xA0 + ((40 - game.flash) >> 1), (40 - game.flash) * 3);
+    } else if (s.status & 0x80) drawShipExplosion(objX(s.x), objY(s.y), s.status, s.explT);
+  }
+  for (const b of game.shipShots) dot(objX(b.x), objY(b.y), 15);
+  for (const b of game.saucerShots) dot(objX(b.x), objY(b.y), 15);
+}
+
+function drawHUD() {
+  // score at DVG (100, 876) x2, lives under it at (160, 852) x1/4, high score at (480, 876) x1
+  drawText(scoreString(game.score), cvX(100), cvY(876), 2);
+  if (game.state !== 'menu') {
+    let x = cvX(160);
+    for (let i = 0; i < game.lives && i < 12; i++) x = drawSegs(SHAPES.LifeShip.segs, x, cvY(852), 0.25, 1, 1)[0];
+  }
+  drawText(scoreString(game.high), cvX(480), cvY(876), 1);
+  // the copyright line at (400, 128), x1
+  const pen = drawSegs(SHAPES.Copyright.segs, cvX(400), cvY(128), 1, 1, 1);
+  drawText('1979 ATARI INC', pen[0], pen[1], 1);
+  if (game.state === 'play' && game.playerDispTimer) drawText('PLAYER 1', cvX(400), cvY(728), 2);
+  // ChkMoreShips ($6970): GAME OVER appears as soon as no ships and no ship shots are left
+  if (game.state !== 'menu' && game.lives <= 0 && game.shipShots.length === 0) drawText('GAME OVER', cvX(400), cvY(628), 2);
+  if (game.state === 'menu' && (game.frame & 0x20) === 0) drawText('PUSH START', cvX(400), cvY(792), 2);
+}
+
+function render() {
+  ctx.setTransform(S, 0, 0, S, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // visible area is the DVG field plus 10 px of overscan; keep everything inside it
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, VIEW_W, VIEW_H); ctx.clip();
+  for (pass = 0; pass < 2; pass++) {
+    ctx.globalCompositeOperation = pass === 0 ? 'lighter' : 'source-over';
+    drawField();
+    drawHUD();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
+  if (game.paused) {
+    ctx.fillStyle = 'rgba(0,0,0,.5)';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const fit = Math.min(window.innerWidth / VIEW_W, window.innerHeight / VIEW_H);
+  S = Math.max(0.25, fit) * dpr;
+  canvas.width = Math.round(VIEW_W * S);
+  canvas.height = Math.round(VIEW_H * S);
+  canvas.style.width = Math.round(VIEW_W * S / dpr) + 'px';
+  canvas.style.height = Math.round(VIEW_H * S / dpr) + 'px';
+  render();
+}
+
+/* ------------------------------------------------------------------ *
+ * Menu / overlay
+ * ------------------------------------------------------------------ */
+const overlay = document.getElementById('overlay');
+const titleEl = document.getElementById('title');
+const subEl = document.getElementById('sub');
+const presetRow = document.getElementById('presets');
+const knobsEl = document.getElementById('knobs');
+const invulnBtn = document.getElementById('invuln');
+const scoresEl = document.getElementById('scores');
+const playBtn = document.getElementById('play');
+const badge = document.getElementById('badge');
+
+let overlayMode = 'menu';
+let focusKnob = 0;
+const presetBtns = {}, knobViews = {};
+
+for (const p of PRESET_ORDER) {
+  const b = document.createElement('button');
+  b.textContent = p.toUpperCase();
+  b.addEventListener('click', () => { Sound.unlock(); applyPreset(p); refreshMenu(); });
+  presetRow.appendChild(b);
+  presetBtns[p] = b;
+}
+KNOBS.forEach((kn, i) => {
+  const row = document.createElement('div'); row.className = 'knob';
+  const name = document.createElement('span'); name.className = 'name'; name.textContent = kn.name;
+  const ctl = document.createElement('div'); ctl.className = 'ctl';
+  const minus = document.createElement('button'); minus.textContent = '-';
+  const val = document.createElement('span'); val.className = 'val';
+  const plus = document.createElement('button'); plus.textContent = '+';
+  minus.addEventListener('click', () => { Sound.unlock(); focusKnob = i; stepKnob(kn.key, -1); refreshMenu(); });
+  plus.addEventListener('click', () => { Sound.unlock(); focusKnob = i; stepKnob(kn.key, +1); refreshMenu(); });
+  ctl.appendChild(minus); ctl.appendChild(val); ctl.appendChild(plus);
+  row.appendChild(name); row.appendChild(ctl);
+  knobsEl.appendChild(row);
+  knobViews[kn.key] = { row, val };
+});
+invulnBtn.addEventListener('click', () => { Sound.unlock(); setInvuln(!settings.invuln); refreshMenu(); });
+
+function fmtScore(v) { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function refreshMenu() {
+  for (const p of PRESET_ORDER) presetBtns[p].classList.toggle('sel', settings.preset === p);
+  for (const kn of KNOBS) {
+    knobViews[kn.key].val.textContent = kn.fmt(settings.knobs[kn.key]);
+    knobViews[kn.key].row.classList.toggle('focus', KNOBS[focusKnob] === kn && overlayMode === 'menu');
+  }
+  invulnBtn.textContent = 'INVULNERABLE: ' + (settings.invuln ? 'ON' : 'OFF');
+  invulnBtn.classList.toggle('on', settings.invuln);
+  badge.classList.toggle('on', settings.invuln && game.state === 'play');
+  const name = settings.preset.toUpperCase();
+  const real = highs[settings.preset] || 0, inv = highs[settings.preset + '.inv'] || 0;
+  scoresEl.textContent = 'BEST (' + name + ') ' + fmtScore(real) + (inv ? '   ·   INVULNERABLE BEST ' + fmtScore(inv) + ' *' : '');
+  game.high = currentHigh();
+  updateSub();
+}
+function updateSub() {
+  if (overlayMode === 'over') {
+    subEl.textContent = 'SCORE ' + fmtScore(game.score) + (game.newBest ? ' — NEW BEST' + (settings.invuln ? ' *' : '') : ' — BEST ' + fmtScore(game.high)) +
+      '  ·  WAVE ' + game.wave + (settings.invuln ? '  ·  HITS TAKEN ' + game.invulnHits : '');
+  } else if (overlayMode === 'pause') {
+    subEl.textContent = 'WAVE ' + game.wave + ' — SCORE ' + fmtScore(game.score);
+  } else {
+    subEl.textContent = PRESET_BLURB[settings.preset] || PRESET_BLURB.custom;
+  }
+}
+function showOverlay(mode) {
+  overlayMode = mode;
+  overlay.classList.remove('hidden');
+  const menuBits = mode !== 'pause';
+  presetRow.style.display = menuBits ? '' : 'none';
+  knobsEl.style.display = menuBits ? '' : 'none';
+  invulnBtn.style.display = menuBits ? '' : 'none';
+  scoresEl.style.display = menuBits ? '' : 'none';
+  if (mode === 'pause') { titleEl.textContent = 'PAUSED'; playBtn.textContent = 'RESUME'; }
+  else if (mode === 'over') { titleEl.textContent = 'GAME OVER'; playBtn.textContent = 'PLAY AGAIN'; }
+  else { titleEl.textContent = 'ASTEROIDS'; playBtn.textContent = 'PLAY'; }
+  refreshMenu();
+}
+function hideOverlay() { overlay.classList.add('hidden'); }
+
+function startPlaying() {
+  Sound.unlock();
+  hideOverlay();
+  newGame();
+  badge.classList.toggle('on', settings.invuln);
+}
+playBtn.addEventListener('click', () => {
+  if (overlayMode === 'pause') { game.paused = false; hideOverlay(); }
+  else startPlaying();
+});
+function togglePause() {
+  if (game.state !== 'play') return;
+  game.paused = !game.paused;
+  if (game.paused) { Sound.thrust(false); showOverlay('pause'); } else hideOverlay();
+}
+function toMenu() {
+  if (game.state === 'play') recordHigh(game.score);
+  game.paused = false;
+  Sound.silence();
+  demoField();
+  badge.classList.remove('on');
+  showOverlay('menu');
+}
+function finishGame() {
+  game.newBest = recordHigh(game.score);
+  badge.classList.remove('on');
+  showOverlay('over');
+}
+
+/* ------------------------------------------------------------------ *
+ * Input
+ * ------------------------------------------------------------------ */
+function keyFlag(k) {
+  switch (k) {
+    case 'ArrowLeft': case 'a': case 'A': return 'left';
+    case 'ArrowRight': case 'd': case 'D': return 'right';
+    case 'ArrowUp': case 'w': case 'W': return 'thrust';
+    case ' ': return 'fire';
+    case 'ArrowDown': case 's': case 'S': case 'Shift': return 'hyper';
+  }
+  return null;
+}
+function menuKey(k) {
+  if (k >= '1' && k <= '4') { applyPreset(PRESET_ORDER[k.charCodeAt(0) - 49]); refreshMenu(); return true; }
+  if (k === 'i' || k === 'I') { setInvuln(!settings.invuln); refreshMenu(); return true; }
+  if (k === 'ArrowUp' || k === 'w' || k === 'W') { focusKnob = (focusKnob + KNOBS.length - 1) % KNOBS.length; refreshMenu(); return true; }
+  if (k === 'ArrowDown' || k === 's' || k === 'S') { focusKnob = (focusKnob + 1) % KNOBS.length; refreshMenu(); return true; }
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') { stepKnob(KNOBS[focusKnob].key, -1); refreshMenu(); return true; }
+  if (k === 'ArrowRight' || k === 'd' || k === 'D') { stepKnob(KNOBS[focusKnob].key, +1); refreshMenu(); return true; }
+  return false;
+}
+window.addEventListener('keydown', (e) => {
+  const k = e.key;
+  const menuOpen = !overlay.classList.contains('hidden');
+  if (k === 'Escape') { e.preventDefault(); if (menuOpen && overlayMode === 'menu') return; toMenu(); return; }
+  if (k === 'p' || k === 'P') { togglePause(); return; }
+  if (k === 'm' || k === 'M') { Sound.unlock(); Sound.toggle(); return; }
+  if (menuOpen) {
+    if (k === ' ' || k === 'Enter') { e.preventDefault(); Sound.unlock(); playBtn.click(); return; }
+    if (overlayMode !== 'pause' && menuKey(k)) { e.preventDefault(); Sound.unlock(); }
+    return;
+  }
+  if (k === 'Enter') { e.preventDefault(); game.input.fire = true; return; }
+  const f = keyFlag(k);
+  if (f) { e.preventDefault(); Sound.unlock(); game.input[f] = true; }
+});
+window.addEventListener('keyup', (e) => {
+  const k = e.key;
+  if (k === 'Enter') { game.input.fire = false; return; }
+  const f = keyFlag(k);
+  if (f) game.input[f] = false;
+});
+window.addEventListener('blur', () => { for (const f in game.input) game.input[f] = false; });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && game.state === 'play' && !game.paused) togglePause();
+});
+
+/* ------------------------------------------------------------------ *
+ * Main loop: fixed 60 Hz steps, rendering every animation frame.
+ * ------------------------------------------------------------------ */
+const STEP = 1 / FPS;
+let last = 0, acc = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!last) last = now;
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.25) dt = 0.25;
+  acc += dt;
+  let guard = 0;
+  while (acc >= STEP && guard++ < 10) { tick(); acc -= STEP; }
+  render();
+}
+function tick() {
+  update();
+  if (game.state === 'gameover' && game.gameOverTimer === 0 && overlay.classList.contains('hidden')) finishGame();
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+seedRng(Date.now() & 255, (Date.now() >> 8) & 255);
+loadSettings();
+demoField();
+showOverlay('menu');
+resize();
+window.addEventListener('resize', resize);
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>

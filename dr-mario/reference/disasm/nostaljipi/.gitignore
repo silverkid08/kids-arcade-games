@@ -1,0 +1,7 @@
+_docs/
+_original/
+.vscode/
+*.nes
+*.mlb
+compile_debug.bat
+checksum.py

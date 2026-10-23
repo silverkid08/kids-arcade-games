@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>CENTIPEDE</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", Courier, monospace; font-weight: bold;
+    color: #fff; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #stage { position: relative; }
+  canvas#screen { display: block; background: #000; image-rendering: pixelated; cursor: none; touch-action: none; }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; gap: 7px;
+    background: rgba(0,0,0,.82); text-align: center; padding: 10px 8px 12px; overflow-y: auto;
+  }
+  #overlay.hidden { display: none; }
+  #logo { image-rendering: pixelated; margin-top: 2px; }
+  #sub { margin: 0; font-size: 12px; line-height: 1.6; color: #e8e8e8; letter-spacing: 1px; min-height: 1.6em; }
+  #sub b { color: #ffff40; }
+  #presets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #presets .lbl, .knob .lbl { font-size: 10px; color: #40ff40; letter-spacing: 1px; }
+  #presets button, .btnrow button {
+    min-width: 64px; height: 28px; font: inherit; font-size: 11px; letter-spacing: 1px; color: #fff; padding: 0 8px;
+    background: #300818; border: 2px solid #ff3030; border-radius: 5px; cursor: pointer;
+  }
+  #presets button:hover, .btnrow button:hover { border-color: #fff; }
+  #presets button.sel { background: #ff3030; border-color: #fff; color: #000; }
+  #presets.row-sel .lbl { color: #ffff40; }
+  #presets .custom { font-size: 11px; color: #ffc0ff; letter-spacing: 1px; }
+  #knobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px 10px; width: 100%; max-width: 700px; }
+  .knob { display: grid; grid-template-columns: 1fr 26px 128px 26px; align-items: center; gap: 4px;
+          padding: 1px 6px; border-radius: 4px; border: 1px solid transparent; }
+  .knob.sel { border-color: #ffff40; background: rgba(255,255,64,.08); }
+  .knob.dim { opacity: .45; }
+  .knob .lbl { text-align: left; }
+  .knob .val { font-size: 11px; color: #fff; letter-spacing: 1px; }
+  .knob button {
+    width: 26px; height: 22px; font: inherit; font-size: 13px; color: #fff; padding: 0;
+    background: #300818; border: 2px solid #ff3030; border-radius: 4px; cursor: pointer; line-height: 1;
+  }
+  .knob button:hover { border-color: #fff; }
+  .knob.on .val { color: #ffff40; }
+  #highs { font-size: 10px; color: #bdbdbd; letter-spacing: 1px; line-height: 1.7; }
+  #highs b { color: #fff; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #play {
+    font: inherit; font-size: 15px; letter-spacing: 3px; padding: 9px 22px; min-width: 120px; height: auto;
+    color: #000; background: #40ff40; border: 2px solid #40ff40; border-radius: 5px; cursor: pointer;
+  }
+  #play:hover, #play.sel { background: #fff; border-color: #ffff40; }
+  .hint { margin: 0; font-size: 10px; color: #8b8b8b; line-height: 1.8; letter-spacing: 1px; }
+  #toast { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; font-size: 11px; letter-spacing: 1px;
+           color: #ffff40; text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
+  #toast.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen" width="240" height="256"></canvas>
+  <div id="toast" class="hidden"></div>
+  <div id="overlay">
+    <canvas id="logo" width="240" height="40"></canvas>
+    <p id="sub"></p>
+    <div id="presets"><span class="lbl">PRESET</span></div>
+    <div id="knobs"></div>
+    <div id="highs"></div>
+    <div class="btnrow">
+      <button id="play">PLAY</button>
+      <button id="resume">RESUME</button>
+    </div>
+    <p class="hint">MOUSE moves the shooter &nbsp;&middot;&nbsp; HOLD LEFT BUTTON to fire (or SPACE) &nbsp;&middot;&nbsp; arrows / WASD also move<br>
+      P pause &nbsp;&middot;&nbsp; M sound &nbsp;&middot;&nbsp; ESC menu &nbsp;&middot;&nbsp; menu: &uarr;&darr; row, &larr;&rarr; change, 1-4 presets, ENTER play</p>
+  </div>
+</div>
+<script>
+/* =====================================================================
+   CENTIPEDE (Atari, 1981) - a faithful clone for kids, played with the
+   mouse instead of the trackball.
+
+   The game logic is a routine-by-routine port of Atari's own 6502 source
+   for revision 4 (CENTI4.MAC / CENIR4.MAC by Ed Logg and Dona Bailey,
+   published at github.com/historicalsource/centipede; copy in
+   reference/src).  Revision 4 is the ROM set MAME calls "centiped": the
+   CRCs of 136001-407..410 in that repo match MAME's exactly.  Routine names
+   (MOTION, SHOOT, BUGMV, ANTMV, SCORP, NEWHD, CENTPC, CHKEND, RESTOR,
+   SOUNDS ...) and variable names (MOBJP, MOBJH, MOBJV, DEAD, CENTIN ...)
+   are the source's own, so any line here can be checked against the asm.
+
+   Coordinates are the arcade's: motion objects have an 8-bit horizontal
+   position H (it grows towards the LEFT of the portrait screen) and an
+   8-bit vertical position V (0 at the bottom).  The playfield is the
+   30x32 stamp RAM at $400-$7BF (address = $400 + column*32 + row, row 0 at
+   the bottom).  The screen is drawn exactly as MAME draws it (unrotated
+   256x240, ROT270) using the genuine picture ROMs 136001-211/212 embedded
+   below, and the sound is a POKEY emulation fed by the game's own sound
+   tables.
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * Genuine picture ROM (136001-211 = plane 0, 136001-212 = plane 1).
+ * Written by tools/inject-rom.js; do not hand-edit.
+ * ------------------------------------------------------------------ */
+/*ROM-BEGIN*/const PICT_ROM = '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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';/*ROM-END*/
+
+const SW = 240, SH = 256;
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const img = ctx.createImageData(SW, SH);
+const fb = new Uint32Array(img.data.buffer);
+
+function b64bytes(s) {
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+const ROM = b64bytes(PICT_ROM);
+/* pixel (ux, uy) of an unrotated picture starting at byte off; plane 1 ($800+) is the high bit */
+function romPx(off, ux, uy) { const b = 7 - ux; return (((ROM[0x800 + off + uy] >> b) & 1) << 1) | ((ROM[off + uy] >> b) & 1); }
+/* 64 playfield stamps (MAME: code (data & $3F) + $40), pre-rotated to the display: [dy*8+dx] */
+const TILES = [];
+for (let t = 0; t < 64; t++) {
+  const a = new Uint8Array(64), off = (0x40 + t) * 8;
+  for (let dy = 0; dy < 8; dy++) for (let dx = 0; dx < 8; dx++) a[dy * 8 + dx] = romPx(off, 7 - dy, dx);
+  TILES.push(a);
+}
+/* 128 motion-object pictures, 8x16 unrotated: [uy*8+ux] */
+const SPR = [];
+for (let s = 0; s < 128; s++) {
+  const a = new Uint8Array(128);
+  for (let uy = 0; uy < 16; uy++) for (let ux = 0; ux < 8; ux++) a[uy * 8 + ux] = romPx(s * 16, ux, uy);
+  SPR.push(a);
+}
+/* colour RAM value -> RGB (MAME centiped_paletteram_w; matches the self-test doc: 0 tan, 1 light green, 2 pink, 15 black) */
+function rgb32(d) {
+  let r = (~d & 1) ? 255 : 0, g = ((~d >> 1) & 1) ? 255 : 0, b = ((~d >> 2) & 1) ? 255 : 0;
+  if (!(d & 8)) { if (b) b = 0xC0; else if (g) g = 0xC0; }
+  return (0xFF000000 | (b << 16) | (g << 8) | r) >>> 0;
+}
+const PAL32 = []; for (let i = 0; i < 16; i++) PAL32.push(rgb32(i));
+
+/* ------------------------------------------------------------------ *
+ * Settings: presets and knobs
+ * ------------------------------------------------------------------ */
+const LS = 'centipede.';
+const freqFmt = v => (v === 0 ? 'OFF' : v === 100 ? 'ON (ARCADE)' : v + '%');
+const KNOBS = [
+  { key: 'centSpeed', label: 'CENTIPEDE SPEED', vals: [30, 40, 50, 60, 65, 70, 80, 85, 90, 100, 115, 130, 150], fmt: v => v + '%' },
+  { key: 'shooterSpeed', label: 'SHOOTER SPEED', vals: [50, 75, 100, 125, 150, 200, 300], fmt: v => v + '%' },
+  { key: 'segments', label: 'CENTIPEDE LENGTH', vals: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12], fmt: v => v + ' SEGMENTS' },
+  { key: 'spider', label: 'SPIDER', vals: [0, 25, 50, 75, 100, 150, 200], fmt: freqFmt },
+  { key: 'flea', label: 'FLEA', vals: [0, 25, 50, 75, 100, 150, 200], fmt: freqFmt },
+  { key: 'scorpion', label: 'SCORPION', vals: [0, 25, 50, 75, 100, 150, 200], fmt: freqFmt },
+  { key: 'mushrooms', label: 'MUSHROOMS', vals: [25, 50, 75, 100, 125, 150, 200], fmt: v => v + '%' },
+  { key: 'shotSpeed', label: 'SHOT SPEED', vals: [50, 75, 100, 150, 200], fmt: v => v + '%' },
+  { key: 'autofire', label: 'AUTO-FIRE (HOLD)', vals: [1, 0], fmt: v => (v ? 'ON' : 'OFF (CLICK EACH)') },
+  { key: 'mouse', label: 'MOUSE MODE', vals: ['abs', 'lock'], fmt: v => (v === 'abs' ? 'POINTER' : 'TRACKBALL LOCK'), nopreset: true },
+  { key: 'sens', label: 'TRACKBALL SENSITIVITY', vals: [25, 50, 75, 100, 150, 200, 300, 400], fmt: v => v + '%', nopreset: true },
+  { key: 'lives', label: 'STARTING LIVES', vals: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+  { key: 'startWave', label: 'STARTING WAVE', vals: Array.from({ length: 16 }, (_, i) => i + 1) },
+  { key: 'bonus', label: 'EXTRA LIFE EVERY', vals: [0, 5000, 8000, 10000, 12000, 15000, 20000], fmt: v => (v ? String(v) : 'NEVER') },
+  { key: 'hard', label: 'ARCADE DIFFICULTY', vals: [0, 1], fmt: v => (v ? 'HARD' : 'EASY (DIP)') },
+  { key: 'invuln', label: 'INVULNERABLE', vals: [0, 1], fmt: v => (v ? 'ON' : 'OFF'), nopreset: true }
+];
+const KNOB = {}; KNOBS.forEach(k => { KNOB[k.key] = k; });
+const PRESETS = {
+  kid:      { centSpeed: 40, shooterSpeed: 200, segments: 8, spider: 25, flea: 0, scorpion: 0, mushrooms: 50, shotSpeed: 150, autofire: 1, lives: 9, startWave: 1, bonus: 5000, hard: 0 },
+  easy:     { centSpeed: 65, shooterSpeed: 150, segments: 10, spider: 50, flea: 50, scorpion: 50, mushrooms: 75, shotSpeed: 100, autofire: 1, lives: 5, startWave: 1, bonus: 10000, hard: 0 },
+  normal:   { centSpeed: 85, shooterSpeed: 125, segments: 12, spider: 75, flea: 75, scorpion: 75, mushrooms: 100, shotSpeed: 100, autofire: 1, lives: 4, startWave: 1, bonus: 10000, hard: 0 },
+  original: { centSpeed: 100, shooterSpeed: 100, segments: 12, spider: 100, flea: 100, scorpion: 100, mushrooms: 100, shotSpeed: 100, autofire: 1, lives: 3, startWave: 1, bonus: 12000, hard: 0 }
+};
+const PRESET_ORDER = ['kid', 'easy', 'normal', 'original'];
+const settings = Object.assign({ mouse: 'abs', sens: 100, invuln: 0 }, PRESETS.original);   // mouse mode, sensitivity and invulnerable are not part of a preset
+
+function presetName() {
+  for (const p of PRESET_ORDER) {
+    const P = PRESETS[p];
+    if (Object.keys(P).every(k => P[k] === settings[k])) return p;
+  }
+  return 'custom';
+}
+function applyPreset(p) { Object.assign(settings, PRESETS[p]); saveSettings(); }
+function setKnob(key, v) { if (KNOB[key] && KNOB[key].vals.includes(v)) { settings[key] = v; saveSettings(); } }
+function stepKnob(key, d) {
+  const k = KNOB[key]; let i = k.vals.indexOf(settings[key]); if (i < 0) i = 0;
+  i = Math.max(0, Math.min(k.vals.length - 1, i + d)); settings[key] = k.vals[i]; saveSettings();
+}
+function lsGet(k) { try { return localStorage.getItem(LS + k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(LS + k, v); } catch (e) { /* storage unavailable */ } }
+function saveSettings() { lsSet('settings', JSON.stringify(settings)); }
+function loadSettings() {
+  let s = null; try { s = JSON.parse(lsGet('settings') || 'null'); } catch (e) { s = null; }
+  if (s && typeof s === 'object') for (const k of KNOBS) if (k.vals.includes(s[k.key])) settings[k.key] = s[k.key];
+}
+/* high-score tables: 8 entries per preset, invulnerable runs in their own table */
+const DEFAULT_TABLE = [[16543, 'EJD'], [15432, 'DFT'], [14320, 'CAD'], [13210, 'DCB'], [13010, 'ED '],
+  [12805, 'DEW'], [12201, 'DFW'], [12102, 'GJR']];                       // CENTS4 CHKEA 99$
+function highKey(preset, inv) { return 'high.' + (preset || presetName()) + ((inv === undefined ? settings.invuln : inv) ? '.inv' : ''); }
+function loadTable(key) {
+  let t = null; try { t = JSON.parse(lsGet(key) || 'null'); } catch (e) { t = null; }
+  if (!Array.isArray(t) || t.length !== 8 || !t.every(e => Array.isArray(e) && typeof e[0] === 'number')) t = DEFAULT_TABLE.map(e => e.slice());
+  return t;
+}
+function saveTable(key, t) { lsSet(key, JSON.stringify(t)); }
+function getHigh(key) { return loadTable(key)[0][0]; }
+
+/* ------------------------------------------------------------------ *
+ * Random numbers.  The arcade reads POKEY's free-running 17-bit
+ * polynomial counter (RNGEN); its value depends on CPU cycle timing,
+ * so any good byte generator plays the same.
+ * ------------------------------------------------------------------ */
+let rngState = 0x2468ACE1;
+function rnd() {
+  rngState ^= rngState << 13; rngState ^= rngState >>> 17; rngState ^= rngState << 5;
+  return (rngState >>> 8) & 0xFF;
+}
+function seed(s) { rngState = (s >>> 0) || 1; for (let i = 0; i < 8; i++) rnd(); }
+
+/* ------------------------------------------------------------------ *
+ * Machine state, named as in CENDE4.MAC
+ * ------------------------------------------------------------------ */
+const NCENT = 12, ANT = 12, BUG = 13, SHT = 14, PL = 15;   // MOBJ slots: 0-11 centipede, 12 flea/scorpion, 13 spider, 14 shot, 15 gun
+const M = {
+  MOBJP: new Uint8Array(16), MOBJDH: new Uint8Array(16), MOBJH: new Uint8Array(16), MOBJV: new Uint8Array(16), MOBJDV: new Uint8Array(16),
+  PICT: new Uint8Array(16), HPOS: new Uint8Array(16), VPOS: new Uint8Array(16), COLOR: new Uint8Array(16),   // motion-object RAM (set in IRQ)
+  colorRam: new Uint8Array(16),                       // $1400-$140F (COLORR = $1404: +0..3 playfield, +9..B motion objects)
+  CH: new Uint8Array(7),                              // CHAN0..CHAN6 sound indices
+  AUDF: [0, 0, 0, 0], AUDC: [0, 0, 0, 0],             // POKEY registers as last written by SOUNDS
+  FRAME: 0, MODE: 0xFF, DELAY: 0, DEAD: 0, NEWD: 0, PLAYHL: 0, PLAYVL: 0,
+  CENTIN: 12, CENTIS: 2, COUNT: 0, COUNT1: 0, COUNT2: 0, COUNT3: 0xC0,
+  LIVES: 0, score: 0, nextBonus: 0, LCOLOR: 0, OLDDH: 0, PTS: 0xB6, MUSH: 0, MEM: 0, OBST: 0,
+  TB: 0, TBV: 0, JHORIZ: 0, JVERT: 0
+};
+const PF = new Uint8Array(0x400);                     // playfield RAM $400-$7FF (only $400-$7BF is shown)
+const P = M.MOBJP, DH = M.MOBJDH, H = M.MOBJH, V = M.MOBJV, DV = M.MOBJDV;
+
+/* per-game knobs resolved at game start */
+let NSEG = 12;
+const game = {
+  ui: 'menu', paused: false, flash: 0, menuDelay: 0, entering: null, sessionOpen: false, lastSummary: null,
+  motionAcc: 0, shotAcc: 0, shotStepAcc: 0, fleaCool: 0, stats: null, frames: 0
+};
+function newStats() { return { shots: 0, hits: 0, bugs: 0, waves: 0, bumps: 0, frames: 0 }; }
+
+/* ------------------------------------------------------------------ *
+ * 6502 helpers
+ * ------------------------------------------------------------------ */
+const comp = a => (-a) & 0xFF;                                   // COMP
+const abs8 = a => ((a & 0x80) ? ((-a) & 0xFF) : a);              // ABS (on a byte)
+const bcd = n => ((Math.floor(n / 10) % 10) << 4) | (n % 10);
+function SCORE2() { return bcd(Math.floor(M.score / 10000) % 100); }   // high two BCD digits
+function SCORE1() { return bcd(Math.floor(M.score / 100) % 100); }     // middle two BCD digits
+function sbcDec(a, b) {                                          // NMOS 6502 SBC in decimal mode, carry set
+  let lo = (a & 15) - (b & 15), hi = (a >> 4) - (b >> 4);
+  if (lo < 0) { lo = (lo - 6) & 15; hi--; }
+  if (hi < 0) hi = (hi - 6) & 15;
+  return ((hi & 15) << 4) | lo;
+}
+const playerAlive = () => !(P[PL] & 0xAF);
+const attract = () => (M.MODE & 0x80) !== 0;
+
+/* text on the playfield (CHAR / MESS): letters $01-$1A, digits $20-$29 */
+function chr(c) {
+  if (c === ' ') return 0;
+  if (c === '©') return 0x1B;
+  if (c === ':') return 0x2E;
+  const k = c.charCodeAt(0);
+  if (k >= 48 && k <= 57) return 0x20 + k - 48;
+  return k & 0x3F;
+}
+function mess(addr, text, blank) { for (const c of text) { PF[(addr - 0x400) & 0x3FF] = blank ? 0 : chr(c); addr += 0x20; } return addr; }
+function digits(addr, value, n) {          // DIGIT2 with zero suppression; the last two digits always show
+  const s = String(Math.floor(value) % Math.pow(10, n)).padStart(n, '0');
+  let sup = true;
+  for (let i = 0; i < n; i++) {
+    let c = s[i];
+    if (sup && c === '0' && i < n - 2) c = ' '; else sup = false;
+    PF[(addr - 0x400) & 0x3FF] = chr(c); addr += 0x20;
+  }
+  return addr;
+}
+
+/* ------------------------------------------------------------------ *
+ * OBSTAC: playfield stamp at (H + 8*dir, V).  Returns the code, sets M.OBST.
+ * ------------------------------------------------------------------ */
+function OBSTAC(v, dir, h) {
+  const lsb = (v >> 3) + ((v >> 2) & 1);            // LSR x3, ADC #0 (rounds to the nearest row)
+  const t = (h + dir * 8) & 0xFF;
+  let a = 0xF7 - t; if (a < 0) a = 0;               // do not wrap round the left edge
+  a &= 0xF8;
+  let hi = (1 << 2) | (a >> 6);
+  a = ((a << 2) & 0xFF) | lsb;
+  if (hi === 7 && a >= 0xC0) a = (a & 0x1F) | 0xA0; // stay on the right side of the playfield
+  M.OBST = (hi << 8) | (a & 0xFF);
+  return PF[M.OBST - 0x400];
+}
+function setObst(code) { PF[M.OBST - 0x400] = code; }
+
+/* OVRLAP: another live segment on the same line just in front of segment x? */
+function OVRLAP(x) {
+  for (let y = 12; y >= 0; y--) {
+    if (V[y] !== V[x]) continue;
+    if (P[y] >= 0xF4) continue;
+    if (y === x) continue;
+    if ((((H[x] - H[y]) & 0xFF) ^ DH[x]) >= 0xF4) return true;
+  }
+  return false;
+}
+
+/* PLAY: collision of object x with the gun.  Returns true when the gun survives. */
+function PLAY(x) {
+  const d = abs8((H[x] - H[PL]) & 0xFF);
+  if (x === BUG) { if (d >= 10) return true; } else if (d >= 7) return true;
+  const e = abs8((V[x] - V[PL]) & 0xFF);
+  if (e >= 7) return true;
+  if (d + e >= (x === BUG ? 14 : 12)) return true;
+  if (settings.invuln && !attract()) { bump(); return true; }
+  PLAYEX(x);
+  return false;
+}
+function PLAYEX(x) {
+  M.DELAY = 0x30;
+  P[PL] = 0x20;                 // explosion pictures $20-$27
+  P[x] = 0xFF;
+  P[SHT] = 0x28;
+  if (!attract()) M.CH[5] = 0x13;
+  M.CH[0] = M.CH[1] = M.CH[2] = M.CH[3] = M.CH[6] = 0;
+}
+/* invulnerable: the hit happens visibly (flash + bonk) but nobody dies */
+function bump() {
+  if (game.flash < 8) { if (game.stats) game.stats.bumps++; if (!M.CH[0]) M.CH[0] = 9; }
+  game.flash = 30;
+}
+/* invulnerable: a head treats the gun right in front of it like a mushroom (it bounces) */
+function gunAhead(x) {
+  if (!settings.invuln || attract() || !playerAlive()) return false;
+  const hx = (H[x] + ((DH[x] & 0x80) ? -8 : 8)) & 0xFF;
+  return abs8((hx - H[PL]) & 0xFF) < 8 && abs8((V[x] - V[PL]) & 0xFF) < 8;
+}
+
+/* MUSHDC / MUSHER: keep MUSH = number of mushrooms in the lower 12 rows */
+function MUSHDC() { if ((M.OBST & 0x1F) < 0x0C) M.MUSH--; }
+function MUSHER() {
+  if (PF[M.OBST - 0x400]) return;
+  const r = M.OBST & 0x1F;
+  if (r === 0 || r === 0x1F || r === 1) return;   // never on the top row or on the gun's bottom row
+  if (r < 0x0C) M.MUSH++;
+  setObst(0x3F);
+}
+
+/* SCORN1 / SCORNG: add points, extra lives, faster new heads every 10,000 */
+function SCORN1(pts) {
+  if (attract()) return;
+  const old = M.score;
+  M.score += pts;
+  if (Math.floor(old / 10000) !== Math.floor(M.score / 10000)) M.COUNT3 = sbcDec(M.COUNT3, 2);   // "YES I KNOW I'M IN DECIMAL MODE"
+  if (settings.bonus && M.score >= M.nextBonus) {
+    M.nextBonus += settings.bonus;
+    if (M.LIVES < 6) { M.LIVES++; M.CH[4] = 17; DLIVES(); }
+  }
+}
+function SCORNG(pts) { M.DEAD--; SCORN1(pts); }
+
+/* ------------------------------------------------------------------ *
+ * Set-up routines
+ * ------------------------------------------------------------------ */
+function CLRCH(x) {                      // colour RAM for wave palette x (0, 3, ... 39)
+  const T = CLRTAB;
+  M.colorRam[0x0A] = M.colorRam[2] = T[x + 2];   // eyes / mushroom outline and all text
+  M.colorRam[0x0B] = M.colorRam[1] = T[x];       // body / inside of mushrooms
+  M.colorRam[0x09] = M.colorRam[3] = T[x + 1];   // legs / inside of poisoned mushrooms
+}
+const CLRTAB = [0x0D, 0, 0x0E, 2, 4, 1, 0x0E, 1, 0x0C, 4, 1, 0x0B,
+  1, 0x0C, 0x0A, 9, 0x0B, 4, 0x0C, 0x0D, 0x0A, 9, 0x0C, 0x0E,
+  0x0A, 0x0E, 1, 0x0B, 1, 4, 1, 0, 6, 0x0D, 0x0E, 0x0A,
+  0x0E, 0x0C, 0x0B, 0, 0x0D, 2];
+
+function waveAdvance() {                 // what CENTPC does to length/speed when a wave is cleared
+  if (M.CENTIS >= 3) {
+    M.CENTIN--;
+    if (M.CENTIN === 0) M.CENTIN = NSEG;
+    M.CENTIS = SCORE2() >= 4 ? 2 : 1;    // only fast centipedes after 40,000
+  }
+}
+function CENTPC() {
+  if (M.DEAD === 0) { M.LCOLOR |= 0x80; waveAdvance(); }   // time to change colours
+  P[0] = 3; DV[0] = M.CENTIS;
+  DH[0] = (M.FRAME & 2) ? M.CENTIS : comp(M.CENTIS);
+  V[0] = 0xF8; H[0] = 0x80;
+  const n = Math.min(M.CENTIN, NSEG);
+  let y = 0x42;
+  for (let x = 1; x < n; x++) {
+    P[x] = y; V[x] = 0xF8; DV[x] = DV[x - 1]; DH[x] = DH[x - 1];
+    H[x] = (H[x - 1] + ((DH[x] & 0x80) ? 8 : 0xF8)) & 0xFF;
+    y--; if (y === 0x3F) y = 0x47;       // alternate body pictures
+  }
+  if (n !== NSEG) {
+    for (let x = n; x < NSEG; x++) {     // the rest are single heads spread along the top
+      V[x] = 0xF8; P[x] = 0; DV[x] = 2;
+      DH[x] = (rnd() & 0x80) ? 0xFE : 2;
+      H[x] = rnd() & 0xF8;
+    }
+  }
+  for (let x = NSEG; x < NCENT; x++) { P[x] = 0xF9; V[x] = 0xF8; DV[x] = 0; DH[x] = 0; }
+  M.DEAD = NSEG;
+  M.NEWD = 0;
+}
+function ANTPC() {
+  P[ANT] = 0x1C; V[ANT] = 0xF8;
+  let r; do { r = rnd() & 0xF8; } while (r < 0x10);
+  H[ANT] = r - 4;
+  DV[ANT] = SCORE2() >= 6 ? 3 : 2;       // ant goes faster at 60K
+  DH[ANT] = 0;
+  M.CH[6] = 0;
+}
+function BUGOFF() {
+  let y = 2;
+  if (SCORE2() === 0) {
+    const thr = (settings.hard ? 0 : 0x40) | 0x10;      // slow spider below 1,000 (hard) / 5,000 (easy)
+    if (!(thr < SCORE1())) y = 1;
+  }
+  DV[BUG] = y;
+  DH[BUG] = (rnd() & 4) ? comp(y) : y;
+  V[BUG] = 0x60; H[BUG] = 0xFF; P[BUG] = 0xF8;
+  M.COUNT2 = settings.spider ? Math.round(0x60 * 100 / settings.spider) : 0x60;
+  M.CH[3] = 0;
+}
+function INIT1() {
+  P[PL] = 0x10; H[PL] = 0x80; H[SHT] = 0x80;
+  V[PL] = 8; V[SHT] = 0x0C; P[SHT] = 0x11;
+}
+function INITSC(nMush) {
+  M.colorRam[0] = 0x0F;                  // black background
+  M.LCOLOR = 0; CLRCH(0);
+  PF.fill(0);
+  M.MUSH = 0;
+  let t1 = 0x1B;
+  for (let i = 0; i < nMush; i++) {
+    const t2 = (rnd() & 0xE0) | t1;
+    const hi = (rnd() & 3) | 4;
+    const addr = (hi << 8) | t2;
+    if ((t2 & 0x1F) < 0x0C && !PF[addr - 0x400]) M.MUSH++;
+    PF[addr - 0x400] = 0x3F;
+    t1--; if (t1 < 2) t1 = 0x1B;         // stay off the bottom rows
+  }
+  for (let a = 0x3C0; a < 0x400; a++) PF[a] = 0;   // columns 30-31 land in motion-object RAM and are overwritten by the IRQ
+  INIT1();
+}
+function INIT(nMush) {
+  M.CENTIN = NSEG; M.CENTIS = 2;         // fast to start with
+  H[PL] = 0x80; DH[PL] = 1; DV[PL] = 1;
+  M.CH.fill(0); M.AUDF.fill(0); M.AUDC.fill(0);
+  M.score = 0;
+  CENTPC();
+  M.COUNT1 = 0xC0; M.COUNT3 = 0xC0;
+  BUGOFF(); ANTPC();
+  INITSC(nMush);
+}
+
+/* ------------------------------------------------------------------ *
+ * MOTION: move the centipede segments (slots 11..0)
+ * ------------------------------------------------------------------ */
+function releaseTail(x) {                // a big centipede reaching the bottom lets its tail go as a new head
+  let y = x + 1;
+  if ((P[y] & 0x80) || !(P[y] & 0x40)) return;
+  for (;;) {
+    if (y === NCENT - 1) break;
+    const n = P[y + 1];
+    if (n & 0x80) break;
+    if (n & 0x40) { y++; continue; }
+    break;
+  }
+  if (V[y] >= 9) return;                 // keep the centipede whole if its tail is not on the bottom row
+  P[y] &= 7; DH[y] = comp(DH[y]); V[y] &= 0xF8; DV[y] = 0;
+}
+function MOTION() {
+  if (M.DELAY) return;
+  if ((M.FRAME & 0x0F) === 0) M.CH[1] = 7;        // little feet noise
+  for (let x = NCENT - 1; x >= 0; x--) {
+    if (P[x] & 0x80) continue;
+    if ((M.FRAME & 1) === 0) P[x] = (P[x] + 1) & 0xF7;   // move legs
+    if (V[x] < 9 && P[x] < 0x10) M.NEWD = 1;              // a plain head on the bottom row starts the new heads
+    let path;
+    if (V[x] & 7) path = 15;                              // turning
+    else {
+      if (M.DEAD === 1) { DH[x] = (DH[x] & 0x80) ? 0xFE : 2; DV[x] = (DV[x] & 0x80) ? 0xFE : 2; }   // speed up last head
+      if (P[x] & 0x40) path = abs8((V[x - 1] - V[x]) & 0xFF) >= 8 ? 15 : 20;   // body follows the segment ahead
+      else if (P[x] & 0x20) path = 15;                    // poisoned head dives
+      else {
+        const h = H[x];
+        if (h >= 0xF0) path = DV[x] === 0 ? 25 : (!(DH[x] & 0x80) ? 15 : 12);        // left edge
+        else if (h < 0x10) path = DV[x] === 0 ? 25 : ((DH[x] & 0x80) ? 15 : 12);    // right edge
+        else path = 12;
+        if (path === 12) {
+          const o = OBSTAC(V[x], (DH[x] & 0x80) ? -1 : 1, H[x]);
+          if (o) { if (o >= 0x38 && o < 0x3C) P[x] |= 0x20; path = 15; }     // poisoned mushroom
+          else if (gunAhead(x)) path = 15;
+          else path = OVRLAP(x) ? 15 : 20;
+        }
+      }
+    }
+    if (path === 15) {
+      if (DV[x] === 0) path = 25;
+      else {
+        let turn = false;
+        if (DV[x] & 0x80) turn = V[x] >= 0x30;           // going up: turn down at the top of the player area
+        else if (V[x] < 9) {                             // at the bottom
+          turn = true;
+          if (!(P[x] & 0x40)) { P[x] &= 0xDF; if (x !== NCENT - 1) releaseTail(x); }
+        }
+        if (turn) DV[x] = comp(DV[x]);
+        V[x] = (V[x] - DV[x]) & 0xFF;
+        path = 20;
+      }
+    }
+    if (path === 20) {
+      H[x] = (H[x] + DH[x]) & 0xFF;
+      if (!PLAY(x)) return;
+      if ((V[x] & 7) !== 4) continue;
+    }
+    DH[x] = comp(DH[x]);                                 // 25$: change direction
+    if (DV[x] !== 0) continue;
+    DV[x] = (DH[x] & 0x80) ? DH[x] : comp(DH[x]);
+    H[x] = (H[x] + ((DH[x] & 0x80) ? 0xFC : 4)) & 0xFF;  // get away from the edge
+  }
+}
+
+/* EXPLOD: run explosions; the gun's explosion ends by starting the mushroom restore */
+function EXPLOD() {
+  for (let x = 13; x >= 0; x--) {
+    const y = P[x];
+    if (y < 0xF9) continue;
+    if (y >= 0xFA) { P[x]--; continue; }
+    if (x === BUG && playerAlive()) P[BUG] = M.PTS;      // show the spider's points
+  }
+  if (playerAlive()) return;
+  if (M.FRAME & 3) return;
+  const a = P[PL];
+  if (a >= 0x28) return;
+  P[PL]++;
+  if (a === 0x27) M.MEM = 0x400;                         // restore mushrooms
+}
+
+/* ------------------------------------------------------------------ *
+ * MOVE: the gun.  Counts are trackball half-pixels; TBLMT allows 8 per
+ * frame (4 px), the arcade's top speed.  The shooter-speed knob scales it.
+ * ------------------------------------------------------------------ */
+function tryH(st) {
+  const nh = (H[PL] + st) & 0xFF;
+  if (OBSTAC(V[PL], 0, nh)) return false;                // obstacle: no horizontal move
+  H[PL] = nh >= 0xF4 ? 0xF4 : nh < 0x0B ? 0x0B : nh;
+  return true;
+}
+function tryV(st) {
+  const nv = (V[PL] + st) & 0xFF;
+  if (OBSTAC(nv, 0, H[PL])) return false;
+  V[PL] = nv < 8 ? 8 : nv >= 0x31 ? 0x30 : nv;
+  return true;
+}
+function moveAxis(counts, vert, soft) {
+  let px = counts >> 1;
+  const s = (vert ? M.PLAYVL : M.PLAYHL) + ((counts & 1) ? 0x80 : 0);
+  if (vert) M.PLAYVL = s & 0xFF; else M.PLAYHL = s & 0xFF;
+  px += s >> 8;
+  const tryF = vert ? tryV : tryH;
+  while (px) {
+    const st = Math.max(-4, Math.min(4, px));
+    if (!tryF(st)) {                                     // blocked by a mushroom
+      if (soft) for (let k = Math.abs(st) - 1; k > 0; k--) if (tryF(Math.sign(st) * k)) break;
+      return;
+    }
+    px -= st;
+  }
+}
+function absTarget() {                   // mouse position (display pixels) -> gun position inside the player area
+  return { h: Math.max(0x0B, Math.min(0xF4, 247 - input.gx)), v: Math.max(8, Math.min(0x30, 252 - input.gy)) };
+}
+function MOVE() {
+  if (attract() || !playerAlive()) return;
+  const oldV = V[PL];
+  let th = M.TB, tv = M.TBV;
+  M.TB = 0; M.TBV = 0;
+  const useAbs = settings.mouse === 'abs' && input.has && !keyHeld();
+  if (useAbs) { const t = absTarget(); th += 2 * (t.h - H[PL]); tv += 2 * (t.v - V[PL]); }
+  const lim = Math.max(1, Math.round(8 * settings.shooterSpeed / 100));
+  th = Math.max(-lim, Math.min(lim, th)); tv = Math.max(-lim, Math.min(lim, tv));
+  moveAxis(th, false, useAbs);
+  moveAxis(tv, true, useAbs);
+  RSHOT1(oldV);
+}
+function RSHOT() { V[SHT] = (V[PL] + 4) & 0xFF; H[SHT] = H[PL]; }
+function RSHOT1(oldV) {
+  const d = V[SHT] - oldV;
+  if (d < 0 || abs8(d & 0xFF) < 5) RSHOT();              // shot still sitting on the gun: carry it along
+  if (!playerAlive()) P[SHT] = 0x28;
+}
+
+/* ATTRT: attract mode - the gun wanders by itself */
+function ATTRT() {
+  if (!attract()) return;
+  if (settings.bonus) mess(mess(0x4F1, 'BONUS EVERY '), String(settings.bonus));
+  mess(0x540, '©1980 ATARI');
+  if ((M.FRAME & 0xFF) === 0) mess(0x56F, 'GAME OVER', true);
+  if (M.FRAME & 0x80) return;
+  let oldV = V[PL];
+  if (playerAlive()) {
+    let h = H[PL], y;
+    y = h < 0x1C ? 1 : h >= 0xE4 ? 0xFF : DH[PL];
+    DH[PL] = y; tryH(y > 127 ? y - 256 : y);
+    oldV = V[PL];
+    const v = V[PL];
+    y = v >= 0x30 ? 0xFF : v < 9 ? 1 : DV[PL];
+    DV[PL] = y; tryV(y > 127 ? y - 256 : y);
+  }
+  RSHOT1(oldV);
+}
+
+/* ------------------------------------------------------------------ *
+ * BUGMV: the spider
+ * ------------------------------------------------------------------ */
+function BUGMV() {
+  if (!playerAlive()) return;
+  const p = P[BUG];
+  if (p & 0x20) {
+    if (p < 0xF8) return;                                // points still on
+    if (!settings.spider && !attract()) return;          // spider switched off
+    M.COUNT2 = (M.COUNT2 - 1) & 0xFFFF;
+    if (M.COUNT2 !== 0) return;
+    M.COUNT2 = (rnd() & 0x2F) | 0x0F;
+    M.CH[3] = 0x14;                                      // spider sound on
+    P[BUG] = 0x14;
+    return;
+  }
+  if ((M.FRAME & 3) === 0) { P[BUG]++; if (P[BUG] >= 0x1C) P[BUG] = 0x14; }
+  M.COUNT2 = (M.COUNT2 - 1) & 0xFF;
+  if (M.COUNT2 === 0) {
+    if (rnd() & 0x80) {
+      if (DH[BUG] === 0) DH[BUG] = M.OLDDH;
+      else if (!(H[BUG] >= 0xFB || H[BUG] < 0x05)) { M.OLDDH = DH[BUG]; DH[BUG] = 0; }   // straight up/down for a while
+    }
+    if (((settings.hard ? 0 : 0x40) | 0x20) & rnd()) DV[BUG] = comp(DV[BUG]);
+    M.COUNT2 = 0x30;
+  }
+  H[BUG] = (H[BUG] - DH[BUG]) & 0xFF;
+  V[BUG] = (V[BUG] - DV[BUG]) & 0xFF;
+  const o = OBSTAC(V[BUG], 0, H[BUG]);
+  if (o && (o & 0x3F) >= 0x38) { setObst(0); MUSHDC(); } // eat the mushroom (not text)
+  if (H[BUG] === 0xFF) { BUGOFF(); return; }             // walked off the screen
+  if (V[BUG] < 9) {
+    if (!(DV[BUG] & 0x80)) { DV[BUG] = comp(DV[BUG]); PLAY(BUG); return; }
+  } else {
+    let a = sbcDec(SCORE2(), 6); if (a & 0x80) a = 0;    // higher scores keep the spider lower
+    a >>= 1; if (a >= 6) a = 5;
+    const lim = (0x60 - a * 8) & 0xFF;
+    if (!(lim >= V[BUG]) && (DV[BUG] & 0x80)) { DV[BUG] = comp(DV[BUG]); PLAY(BUG); return; }
+  }
+  if (OVRLAP(BUG)) DV[BUG] = comp(DV[BUG]);
+  PLAY(BUG);
+}
+
+/* ------------------------------------------------------------------ *
+ * SHOOT: fire, move the shot (7 px a frame) and check what it hits
+ * ------------------------------------------------------------------ */
+function explode(x) { M.CH[0] = 0x13; P[x] = 0xFF; }
+function shotStep(fire, step) {
+  if (V[SHT] >= 0xF3) { RSHOT(); return; }              // off the top
+  if (((V[PL] + 4) & 0xFF) === V[SHT]) {                // shot is resting on the gun
+    if (!playerAlive()) return;
+    const f = attract() ? !(rnd() & 4) : fire();
+    if (!f) return;
+    M.CH[2] = 0x0B;                                      // shot sound
+    if (game.stats && !attract()) game.stats.shots++;
+  }
+  const old = V[SHT];
+  V[SHT] = (old + step) & 0xFF;
+  const o = OBSTAC((old + 1) & 0xFF, 0, H[SHT]);
+  if (o) {
+    let c = o & 0x3F;
+    if (c >= 0x38) {                                     // a mushroom: 4 hits
+      c--;
+      if (c === 0x3B || c === 0x37) { SCORN1(1); setObst(0); MUSHDC(); }
+      else setObst(c);
+    }
+    RSHOT(); return;
+  }
+  for (let x = 13; x >= 0; x--) {
+    const p = P[x];
+    if (!(p < 0x76 || (p >= 0xB9 && p < 0xF8))) continue;    // dead / exploding / points
+    if (V[x] >= 0xF8) continue;                              // off the top
+    const dv = abs8((V[x] - V[SHT]) & 0xFF);
+    const fastAnt = x === ANT && p < 0x20 && DV[ANT] >= 4;
+    if (!(fastAnt ? dv < 7 : dv < 5)) continue;
+    const dh = abs8((H[x] - H[SHT]) & 0xFF);
+    if (x === BUG) {
+      if (dh >= 10) continue;
+      let pts = 300; M.PTS = 0xB6;                       // 300 / 600 / 900 by distance to the gun
+      const d = abs8((V[BUG] - V[PL]) & 0xFF);
+      if (d < 0x40) { M.PTS = 0xB7; pts = 900; if (d >= 0x16) { M.PTS = 0xB8; pts = 600; } }
+      M.COUNT = settings.spider ? Math.round(0x80 * 100 / settings.spider) : 0x80;
+      M.COUNT2 = 0x80; M.CH[3] = 0;
+      if (H[BUG] > 0xF0) H[BUG] = 0xF0; else if (H[BUG] <= 0x10) H[BUG] = 0x10;   // keep the points on screen
+      hitBy(x); SCORN1(pts); explode(x); RSHOT(); return;
+    }
+    if (x < NCENT) {
+      if (dh >= 6) continue;
+      hitBy(x);
+      SCORNG(P[x] & 0x40 ? 10 : 100);                    // body 10, head 100
+      if (x !== NCENT - 1 && !(P[x + 1] & 0x80)) P[x + 1] &= 0xBF;   // the segment behind becomes a head
+      OBSTAC(V[x], (DH[x] & 0x80) ? -1 : 1, H[x]);       // a mushroom where it was heading
+      MUSHER();
+      explode(x); RSHOT(); return;
+    }
+    if (p >= 0x20) {                                     // scorpion
+      if (dh >= 10) continue;
+      hitBy(x); SCORN1(1000); explode(x); RSHOT(); return;
+    }
+    if (dh >= 6) continue;                               // flea: 2 hits
+    if (DV[ANT] === 4) { hitBy(x); SCORN1(200); explode(x); fleaGone(); RSHOT(); return; }
+    DV[ANT] = 4; RSHOT(); return;                        // first hit just speeds it up
+  }
+}
+function hitBy() { if (game.stats && !attract()) { game.stats.hits++; game.stats.bugs++; } }
+function fireNow() {
+  if (settings.autofire) return input.fireHeld || input.keyFire;
+  if (input.fireEdge) { input.fireEdge = false; return true; }
+  return false;
+}
+function SHOOT() {
+  const pct = attract() ? 100 : settings.shotSpeed;
+  if (pct <= 100) {                      // slower shot: smaller steps
+    game.shotStepAcc += 7 * pct / 100;
+    const step = Math.max(1, Math.floor(game.shotStepAcc)); game.shotStepAcc -= step;
+    shotStep(fireNow, step);
+  } else {                               // faster shot: extra 7-pixel steps
+    game.shotAcc += pct / 100;
+    while (game.shotAcc >= 1) { game.shotAcc -= 1; shotStep(fireNow, 7); }
+  }
+  if (M.DEAD === 0 && M.DELAY === 0) {   // whole centipede shot: next wave after a delay
+    M.CENTIS++; M.DELAY = 0x40;
+    if (game.stats && !attract()) game.stats.waves++;
+    return;
+  }
+  if (P[BUG] >= 0x9C) { M.COUNT = (M.COUNT - 1 + 0x10000) % 0x10000; if (M.COUNT === 0) BUGOFF(); }   // slow down new spider
+}
+
+/* NEWHD: new heads from the sides once a head has reached the bottom */
+function NEWHD() {
+  if (!M.NEWD || M.DELAY) return;
+  if (M.COUNT1) { M.COUNT1--; return; }
+  let y = NSEG - 1;
+  while (y >= 0 && !(P[y] & 0x80)) y--;
+  if (y < 0) return;
+  P[y] = 0; V[y] = 0x40; H[y] = 0xFC; DV[y] = 2;       // new heads go fast
+  let a = M.COUNT3;
+  if (a >= 0x60) { a = (a - 8) & 0xFF; M.COUNT3 = a; }
+  M.COUNT1 = a;
+  if (rnd() & 2) DH[y] = 2; else { H[y] = 4; DH[y] = 0xFE; }
+  M.DEAD++;
+}
+
+/* SCORP: the scorpion (shares slot 12 with the flea) */
+function SCORP() {
+  const a = P[ANT];
+  if (a >= 0x34) { if (a < 0xFA) ANTPC(); return; }      // exploding / finished
+  if (a < 0x30) {
+    if (V[ANT] < 0xF8) return;                           // a flea is falling
+    if ((M.FRAME & 0xFF) !== 0) return;
+    if (M.CENTIN >= NSEG - 1) return;                    // not until the centipede gets short (wave 4)
+    if (rnd() & 3) return;
+    if (!attract() && (!settings.scorpion || rnd() * 100 / 256 >= settings.scorpion)) return;
+    M.CH[6] = 20; P[ANT] = 0x30;
+    if (SCORE2() >= 2 && (rnd() & 3)) DH[ANT] = (rnd() & 0x80) ? 0xFE : 2;
+    else DH[ANT] = (rnd() & 0x80) ? 0xFF : 1;
+    H[ANT] = 0; DV[ANT] = 0;
+    V[ANT] = ((rnd() & 0x78) + 0x70) & 0xFF;             // upper half of the screen
+  }
+  if (!playerAlive()) { ANTPC(); return; }
+  H[ANT] = (H[ANT] + DH[ANT]) & 0xFF;
+  if (H[ANT] === 0) { ANTPC(); return; }                 // crossed the screen
+  if ((M.FRAME & 3) === 0) P[ANT] = ((P[ANT] + 1) & 3) | 0x30;
+  const o = OBSTAC(V[ANT], 0, H[ANT]);
+  if (o < 0x40 && o >= 0x3C) setObst(o & 0xFB);          // poison the mushroom
+}
+
+/* ANTMV: the flea drops when few mushrooms are left near the bottom */
+function fleaGone() { if (!attract() && settings.flea && settings.flea < 100) game.fleaCool = Math.round((100 / settings.flea - 1) * 180); }
+function ANTMV() {
+  if (!playerAlive()) return;
+  if (P[ANT] >= 0x20) return;
+  if (V[ANT] >= 0xF8) {
+    if (M.CENTIN >= NSEG) return;                        // no fleas in the first wave
+    if (!attract()) {
+      if (!settings.flea) return;
+      if (game.fleaCool > 0) { game.fleaCool--; return; }
+    }
+    const s2 = SCORE2();
+    let y = s2 < 2 ? 5 : 9;                              // more fleas from 20,000
+    if (s2 >= 0x12) y = ((s2 >> 1) + 6) & 0xFF;
+    if (!attract() && settings.flea > 100) y += settings.flea >= 200 ? 4 : 2;
+    if (y < M.MUSH) return;
+  }
+  if ((M.FRAME & 3) === 0) P[ANT] = ((P[ANT] + 2) & 3) | 0x1C;
+  const h0 = H[ANT];
+  V[ANT] = (V[ANT] - DV[ANT]) & 0xFF;
+  if (V[ANT] < 4) { ANTPC(); fleaGone(); return; }       // reached the bottom
+  if (!PLAY(ANT)) return;
+  if (M.FRAME & 3) return;
+  if (rnd() & 3) return;
+  OBSTAC((V[ANT] + 4) & 0xFF, 0, h0);                    // drop a mushroom behind it
+  MUSHER();
+}
+
+/* ------------------------------------------------------------------ *
+ * CHKEND: delays between waves and lives, game over
+ * ------------------------------------------------------------------ */
+function CHKEND() {
+  if (!M.DELAY) return;
+  if (M.MEM) return;                                     // wait until the mushrooms are restored
+  M.DELAY--;
+  if (M.DELAY) return;
+  if (playerAlive()) { CENTPC(); return; }               // next wave
+  INIT1();
+  if (attract()) { BUGOFF(); ANTPC(); CENTPC(); return; }
+  if (M.LIVES === 0) { gameOver(); return; }
+  M.LIVES--; DLIVES();
+  BUGOFF(); ANTPC(); CENTPC();
+}
+/* RESTOR: after a death, every damaged or poisoned mushroom is made whole for 5 points */
+function RESTOR() {
+  if (M.FRAME & 7) return;
+  if (M.CH[5]) return;                                   // wait for the gun's explosion sound
+  for (;;) {
+    if (!M.MEM) return;
+    if (M.MEM >= 0x7C0) { M.MEM = 0; return; }
+    const a = PF[M.MEM - 0x400] & 0x3F;
+    if (a >= 0x38 && a < 0x3F) {
+      PF[M.MEM - 0x400] = 0x3F;
+      SCORN1(5);
+      P[NCENT - 1] = 0xFF;                               // an explosion on the mushroom
+      V[NCENT - 1] = (M.MEM << 3) & 0xFF;
+      H[NCENT - 1] = (((((M.MEM >> 5) & 0x1F) ^ 0x1F) << 3) - 4) & 0xFF;
+      M.MEM++;
+      M.CH[0] = 0x13;
+      return;
+    }
+    M.MEM++;
+  }
+}
+function DLIVES() { for (let k = 0; k < 6; k++) PF[0x4DF - 0x400 + k * 0x20] = k < M.LIVES ? 0x1F : 0; }
+function UPSCRE() { digits(0x41F, M.score, 6); digits(0x59F, curTable()[0][0], 6); }
+function SCORES() {                       // the attract-mode high score table
+  mess(0x55D, 'HIGH SCORES');
+  const t = curTable();
+  for (let i = 0; i < 8; i++) { const a = digits(0x55C - i, t[i][0], 6); mess(a, ' ' + t[i][1]); }
+}
+function clearScores() { mess(0x55D, 'HIGH SCORES', true); for (let i = 0; i < 8; i++) mess(0x55C - i, '          ', true); }
+
+/* ------------------------------------------------------------------ *
+ * SOUNDS: the arcade's sound sequencer, writing POKEY registers
+ * ------------------------------------------------------------------ */
+const FREQ0 = [0, 0, 0, 0, 0xF0, 0xE0, 0xD0, 0xC0, 0xB0, 0xA0, 0x90, 0x80, 0x70, 0x60, 0x50, 0x40, 0x30, 0x20, 0x10];   // explosion
+const CONT0 = [0, 0, 0, 0, 0x81, 0x81, 0x81, 0x82, 0x82, 0x82, 0x82, 0x83, 0x83, 0x83, 0x83, 0x84, 0x84, 0x84, 0x84];
+const FREQ1 = [0x70, 0, 0, 0xA0, 0, 0xC0, 0xE0], CONT1 = [0xA1, 0, 0, 0xA2, 0, 0xA2, 0xA4];                        // little feet
+const FREQ2 = [0xF0, 0xE0, 0xD0, 0xC0, 0xB0, 0xA0, 0x90, 0x80, 0x70, 0x60, 0x50];                                  // shot
+const FREQ3 = [5, 5, 0x20, 0x20, 0x30, 0x30, 0x35, 0x35, 0x30, 0x30, 0x20, 0x20, 5, 5, 0x20, 0x20, 0x30, 0x30, 0x35, 0x35];   // spider
+const CONT3 = [0xA1, 0, 0xA2, 0, 0xA3, 0, 0xA4, 0, 0xA3, 0, 0xA2, 0, 0xA1, 0, 0xA2, 0, 0xA3, 0, 0xA2, 0];
+const FREQ4 = [0x28, 0x28, 0x30, 0x28, 0x28, 0x30, 0x3C, 0x51, 0x50, 0x50, 0x60, 0x50, 0x50, 0x60, 0x74, 0xA2, 0];   // bonus life
+const FREQ6 = [0x60, 0x60, 0x70, 0x70, 0x60, 0x60, 0x60, 0x70, 0x70, 0x70, 0x50, 0x50, 0x80, 0x80, 0x50, 0x50, 0x50, 0x80, 0x80, 0x80];   // scorpion
+function SOUNDS() {
+  const C = M.CH, F = M.AUDF, A = M.AUDC;
+  if (attract()) { A[0] = A[1] = A[2] = A[3] = 0; return; }
+  if (M.FRAME & 1) {                                     // spider every other frame
+    const y = C[3]; let a = 0;
+    if (y) { C[3]--; if (C[3] === 0) C[3] = 0x14; F[3] = FREQ3[y - 1]; a = CONT3[y - 1]; }
+    A[3] = a;
+  }
+  { const y = C[2]; let a = 0; if (y) { C[2]--; F[2] = FREQ2[y - 1]; a = 0x64; } A[2] = a; }
+  let skip1 = false, a1 = null;
+  if (C[4]) {                                            // bonus life
+    if (M.FRAME & 7) skip1 = true;
+    else { const y = C[4] - 1; C[4]--; if (y) { F[1] = FREQ4[y - 1]; a1 = 0xA4; } }
+  }
+  if (!skip1 && a1 === null) {
+    const antOn = V[ANT] < 0xF8 && playerAlive() && P[ANT] < 0x34;
+    if (antOn && P[ANT] >= 0x20) {                       // scorpion
+      let y = (C[6] - 1) & 0xFF; if (y === 0) y = 20; C[6] = y;
+      F[1] = FREQ6[y - 1] || 0; a1 = 0xA4;
+    } else if (antOn) {                                  // flea: pitch follows its height
+      F[1] = ((V[ANT] >> 1) ^ 0xFF) | 0x80; a1 = 0xA4;
+    } else {                                             // centipede feet
+      const y = C[1]; a1 = 0;
+      if (y) { C[1]--; F[1] = FREQ1[y - 1]; a1 = CONT1[y - 1]; }
+    }
+  }
+  if (!skip1) A[1] = a1;
+  if (C[5]) {                                            // gun explosion, every 4th frame
+    if (M.FRAME & 3) return;
+    const y = C[5] - 1; C[5]--;
+    if (!y) return;
+    F[0] = FREQ0[y - 1]; let a = CONT0[y - 1]; if (a) a += 2; A[0] = a;
+    return;
+  }
+  const y0 = C[0]; let a0 = 0;
+  if (y0) { C[0]--; F[0] = FREQ0[y0 - 1]; a0 = CONT0[y0 - 1]; }
+  A[0] = a0;
+}
+
+/* POKEY emulation (1.512 MHz, AUDCTL = $20: channel 3 on the fast clock),
+   fed one register snapshot per game frame through a ScriptProcessor. */
+const Sound = (function () {
+  const CLOCK = 1512000;
+  let ac = null, node = null, gainNode = null, muted = false;
+  const queue = [];
+  let curF = [0, 0, 0, 0], curC = [0, 0, 0, 0], frameLeft = 0, cyc = 0;
+  const rem = [0, 0, 0, 0], out = [0, 0, 0, 0];
+  let poly4, poly5, poly17, dcX = 0, dcY = 0, lp = 0;
+  function polyInit45(size) {
+    const mask = (1 << size) - 1, a = new Uint8Array(mask); let l = 0;
+    for (let i = 0; i < mask; i++) { l = ((l << 1) | (~((l >> 2) ^ (l >> (size - 1))) & 1)) & mask; a[i] = l & 1; }
+    return a;
+  }
+  function polyInit17() {
+    const n = (1 << 17) - 1, a = new Uint8Array(n); let l = 0;
+    for (let i = 0; i < n; i++) {
+      const in8 = ((l >> 8) & 1) ^ ((l >> 13) & 1), inb = l & 1;
+      l = l >>> 1; l = (l & 0xff7f) | (in8 << 7); l = (inb << 16) | l; a[i] = l & 1;
+    }
+    return a;
+  }
+  function process(e) {
+    const o = e.outputBuffer.getChannelData(0), sr = ac.sampleRate;
+    const cps = CLOCK / sr, spf = sr / 60;
+    for (let i = 0; i < o.length; i++) {
+      if (frameLeft <= 0) { if (queue.length) { const q = queue.shift(); curF = q[0]; curC = q[1]; } frameLeft += spf; }
+      frameLeft--;
+      cyc += cps;
+      let s = 0;
+      for (let c = 0; c < 4; c++) {
+        const ctl = curC[c], vol = ctl & 15;
+        const period = c === 2 ? curF[c] + 4 : (curF[c] + 1) * 28;
+        rem[c] -= cps;
+        while (rem[c] <= 0) {
+          rem[c] += period;
+          const t = Math.floor(cyc + rem[c]);
+          if ((ctl & 0x80) || poly5[t % 31]) {
+            if (ctl & 0x20) out[c] ^= 1;
+            else if (ctl & 0x40) out[c] = poly4[t % 15];
+            else out[c] = poly17[t % 131071];
+          }
+        }
+        if (vol) s += ((ctl & 0x10) || out[c]) ? vol : 0;
+      }
+      const x = s / 60;
+      dcY = x - dcX + 0.995 * dcY; dcX = x;              // DC blocker
+      lp += (dcY - lp) * 0.45;                            // gentle low-pass, like the board's output filter
+      o[i] = lp * 0.9;
+    }
+    if (cyc > 1e9) cyc -= 131071 * 15 * 31 * 100;
+  }
+  function init() {
+    if (ac) { if (ac.state === 'suspended' && ac.resume) ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      ac = new AC();
+      poly4 = polyInit45(4); poly5 = polyInit45(5); poly17 = polyInit17();
+      node = ac.createScriptProcessor(1024, 1, 1);
+      node.onaudioprocess = process;
+      gainNode = ac.createGain(); gainNode.gain.value = muted ? 0 : 0.6;
+      node.connect(gainNode); gainNode.connect(ac.destination);
+    } catch (err) { ac = null; }
+  }
+  function push(f, c) {
+    if (!ac) return;
+    queue.push([f.slice(), c.slice()]);
+    if (queue.length > 6) queue.splice(0, queue.length - 3);
+  }
+  function silence() { queue.length = 0; curC = [0, 0, 0, 0]; }
+  function setMuted(m) { muted = m; if (gainNode) gainNode.gain.value = m ? 0 : 0.6; }
+  return { init, push, silence, setMuted, isMuted: () => muted, active: () => !!ac };
+})();
+
+/* ------------------------------------------------------------------ *
+ * IRQ (vertical blank part): frame counter, joystick, wave colours, and
+ * the motion-object RAM the video hardware draws
+ * ------------------------------------------------------------------ */
+function JOYS(pPos, pNeg, y) {           // CENIR4 JOYS: speed ramps to 6 counts a frame
+  if (pPos) { if (y === 0xFA) return y; if (!(y >= 0xFA)) y = 0; return (y - 1) & 0xFF; }
+  if (pNeg) { if (y === 6) return y; if (!(y < 6)) y = 0; return y + 1; }
+  return 0;
+}
+const s8 = v => (v > 127 ? v - 256 : v);
+function IRQ() {
+  M.FRAME = (M.FRAME + 1) & 0xFFFF;
+  M.JHORIZ = JOYS(input.right, input.left, M.JHORIZ); M.TB += s8(M.JHORIZ);
+  M.JVERT = JOYS(input.down, input.up, M.JVERT); M.TBV += s8(M.JVERT);
+  if (M.LCOLOR & 0x80) {                                 // next wave's colours
+    let a = (M.LCOLOR & 0x3F) + 3; if (a >= 42) a = 0;
+    M.LCOLOR = a; CLRCH(a);
+  }
+  for (let x = 15; x >= 0; x--) {
+    M.VPOS[x] = V[x];
+    let h = H[x], y = 0;
+    if (x !== BUG) { y = DH[x]; if (y & 0x80) h = (h + 1) & 0xFF; }   // face the picture the right way
+    M.HPOS[x] = h;
+    const flip = y & 0x80;
+    let p = P[x];
+    if (x < NCENT) {
+      let q = p & 0x3F;
+      if (q < 0x30) { q &= 0x0F; const v7 = V[x] & 7; if (v7) q ^= (v7 >= 6 || v7 < 3) ? 8 : 0x0C; }   // turning pictures
+      p = q;
+    }
+    M.PICT[x] = p ^ flip;
+    M.COLOR[x] = (((P[x] & 0x40) && x < NCENT) ? 0x0C : 0) | 0x39;    // body segments: eyes filled in
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Game flow
+ * ------------------------------------------------------------------ */
+function curTable() { return game.table || loadTable(highKey()); }
+function bootAttract() {
+  NSEG = 12;
+  M.MODE = 0xFF;
+  INIT(46);
+  SCORES();
+  game.table = loadTable(highKey());
+}
+function startPlaying() {
+  Sound.init(); Sound.silence();
+  if (game.sessionOpen) endSession(false);
+  seed((Date.now() ^ (Math.random() * 0x7FFFFFFF)) >>> 0);
+  NSEG = settings.segments;
+  game.table = loadTable(highKey());
+  M.MODE = 0;
+  M.LIVES = settings.lives - 1;
+  M.nextBonus = settings.bonus || Infinity;
+  M.DELAY = 0; M.MEM = 0;
+  INIT(Math.round(46 * settings.mushrooms / 100));
+  for (let w = 1; w < settings.startWave; w++) { M.CENTIS++; waveAdvance(); }
+  M.LCOLOR = ((settings.startWave - 1) * 3) % 42; CLRCH(M.LCOLOR);
+  M.DEAD = NSEG; CENTPC();
+  DLIVES();
+  game.entering = null; game.paused = false; game.flash = 0; game.menuDelay = 0;
+  game.motionAcc = 0; game.shotAcc = 0; game.shotStepAcc = 0; game.fleaCool = 0;
+  game.stats = newStats(); game.sessionOpen = true; game.ui = 'play';
+  game.startPreset = presetName(); game.startInv = settings.invuln;
+  input.fireEdge = false;
+  hideOverlay();
+  if (settings.mouse === 'lock') lockPointer();
+}
+function endSession() { game.sessionOpen = false; }
+function gameOver() {
+  M.MODE = 0xFF;                                         // back to attract
+  const st = game.stats || newStats();
+  const sum = { score: M.score, waves: st.waves, shots: st.shots, hits: st.hits, acc: st.shots ? Math.round(100 * st.hits / st.shots) : 0,
+    secs: Math.round(st.frames / 60), preset: game.startPreset || presetName(), inv: game.startInv };
+  game.lastSummary = sum;
+  endSession();
+  UPDATE();
+  BUGOFF(); CENTPC(); ANTPC();
+  M.FRAME = (M.FRAME & 0xFF00) | 1;
+  mess(0x56F, 'GAME OVER');
+  unlockPointer();
+  Sound.silence();
+  if (!game.entering) game.menuDelay = 120;
+}
+/* UPDATE / GETINT: the high score table and entering initials */
+function UPDATE() {
+  const key = highKey(game.startPreset, game.startInv), t = loadTable(key);
+  game.table = t; game.tableKey = key;
+  let k = t.findIndex(e => e[0] < M.score);
+  if (k < 0 || !M.score) { game.lastSummary.rank = 0; return; }
+  t.splice(k, 0, [M.score, 'A  ']); t.length = 8;
+  game.lastSummary.rank = k + 1;
+  game.entering = { idx: k, pos: 0, letters: [1, 0, 0], timeout: 60 * 60, debounce: 0 };
+  M.TB = 0; input.fireEdge = false; input.keyFireEdge = false; input.initDX = 0;
+  game.ui = 'initials';
+  showToast('NEW HIGH SCORE!  MOVE THE MOUSE LEFT/RIGHT TO PICK A LETTER, CLICK TO ACCEPT (OR TYPE IT)');
+}
+const LETTERS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function GETINT() {
+  const E = game.entering; if (!E) return;
+  mess(0x52C, 'GREAT SCORE');
+  mess(0x4AB, 'ENTER YOUR INITIALS');
+  for (let i = 0; i < 3; i++) PF[0x589 - 0x400 + i * 0x20] = E.letters[i];
+  if (--E.timeout <= 0) { finishInitials(); return; }
+  if (input.fireEdge || input.keyFireEdge) {             // fire: next initial
+    input.fireEdge = false; input.keyFireEdge = false;
+    nextInitial(); return;
+  }
+  if ((M.FRAME & 7) === 0) {                             // every 8th frame: trackball / mouse changes the letter
+    const tb = Math.trunc(M.TB + input.initDX * 2); M.TB = 0; input.initDX = 0;
+    if (Math.abs(tb) >= 4) {
+      let l = E.letters[E.pos] + (tb > 0 ? -1 : 1);
+      if (l < 0) l = 26; if (l >= 27) l = 0;
+      E.letters[E.pos] = l;
+    }
+  }
+}
+function typeInitial(ch) {
+  const E = game.entering; if (!E) return;
+  const i = LETTERS.indexOf(ch.toUpperCase()); if (i < 0) return;
+  E.letters[E.pos] = i; nextInitial();
+}
+function nextInitial() {
+  const E = game.entering;
+  E.pos++;
+  if (E.pos >= 3) { finishInitials(); return; }
+  E.letters[E.pos] = 1; E.timeout = 60 * 60;
+}
+function finishInitials() {
+  const E = game.entering;
+  game.table[E.idx][1] = E.letters.map(l => LETTERS[l]).join('');
+  saveTable(game.tableKey, game.table);
+  game.entering = null;
+  mess(0x52C, 'GREAT SCORE', true); mess(0x4AB, 'ENTER YOUR INITIALS', true); mess(0x589, '   ', true);
+  SCORES();
+  hideToast();
+  toMenu_('gameover');
+}
+
+function update() {
+  if (game.paused) return;
+  IRQ();
+  if (game.entering) { SOUNDS(); GETINT(); Sound.push(M.AUDF, M.AUDC); return; }
+  SOUNDS();
+  ATTRT();
+  UPSCRE();
+  const pct = attract() ? 100 : settings.centSpeed;
+  game.motionAcc += pct / 100;
+  while (game.motionAcc >= 1) { game.motionAcc -= 1; MOTION(); }
+  EXPLOD();
+  MOVE();
+  BUGMV();
+  SHOOT();
+  NEWHD();
+  SCORP();
+  ANTMV();
+  CHKEND();
+  RESTOR();
+  if (game.flash) game.flash--;
+  if (game.stats && !attract() && playerAlive()) game.stats.frames++;
+  if (game.menuDelay && --game.menuDelay === 0 && game.ui === 'play') toMenu_('gameover');
+  Sound.push(M.AUDF, M.AUDC);
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering (as MAME draws it: playfield, then motion objects 0..15)
+ * ------------------------------------------------------------------ */
+function drawTile(code, c, r, pens) {
+  const t = TILES[code & 0x3F], fx = (code >> 6) & 1, fy = (code >> 7) & 1;
+  const x0 = c * 8, y0 = (31 - r) * 8;
+  for (let dy = 0; dy < 8; dy++) {
+    const row = (y0 + dy) * SW + x0, sdy = fx ? 7 - dy : dy;
+    for (let dx = 0; dx < 8; dx++) fb[row + dx] = pens[t[sdy * 8 + (fy ? 7 - dx : dx)]];
+  }
+}
+function drawMO(i, white) {
+  const pict = M.PICT[i], col = M.COLOR[i];
+  const code = ((pict & 0x3E) >> 1) | ((pict & 1) << 6);
+  const fx = (pict >> 6) & 1, fy = (pict >> 7) & 1;
+  const X0 = M.VPOS[i], Y0 = 240 - M.HPOS[i];
+  const s = SPR[code];
+  const cr = M.colorRam;
+  const pens = [0, 0, 0, 0];
+  for (let v = 1; v < 4; v++) { const f = (col >> (2 * (v - 1))) & 3; pens[v] = f ? (white ? 0xFFFFFFFF : PAL32[cr[8 + f] & 15]) : 0; }
+  for (let uy = 0; uy < 16; uy++) {
+    const Y = Y0 + uy; if (Y < 0 || Y >= SW) continue;
+    const sy = (fy ? 15 - uy : uy) * 8;
+    for (let ux = 0; ux < 8; ux++) {
+      const X = X0 + ux; if (X > 247) continue;           // sprites are clipped out of the score row
+      const v = s[sy + (fx ? 7 - ux : ux)]; if (!v) continue;
+      const c = pens[v]; if (!c) continue;
+      fb[(255 - X) * SW + Y] = c;
+    }
+  }
+}
+function drawText(str, x, y, col) {      // ROM font straight into the frame buffer (badges / UI only)
+  for (let i = 0; i < str.length; i++) {
+    const code = chr(str[i]); if (!code) continue;
+    const t = TILES[code];
+    for (let dy = 0; dy < 8; dy++) for (let dx = 0; dx < 8; dx++) {
+      const X = x + i * 8 + dx, Y = y + dy;
+      if (t[dy * 8 + dx] && X >= 0 && X < SW && Y >= 0 && Y < SH) fb[Y * SW + X] = col;
+    }
+  }
+}
+function render() {
+  const cr = M.colorRam;
+  const pens = [PAL32[cr[0] & 15], PAL32[cr[1] & 15], PAL32[cr[2] & 15], PAL32[cr[3] & 15]];
+  for (let c = 0; c < 30; c++) for (let r = 0; r < 32; r++) drawTile(PF[c * 32 + r], c, r, pens);
+  const flashGun = game.flash && ((game.flash >> 1) & 1);
+  for (let i = 0; i < 16; i++) drawMO(i, i === PL && flashGun);
+  if (!attract() && game.ui !== 'menu') {
+    if (settings.invuln) drawText('INVULNERABLE', 72, 248, flashGun ? 0xFFFFFFFF : 0xFF40FFFF);
+    if (game.paused) drawText('PAUSED', 96, 124, 0xFFFFFFFF);
+    if (settings.mouse === 'abs' && input.has && game.ui === 'play' && input.gy < 196) {   // where the mouse is, when it is above the player area
+      const col = 0xFF909090;
+      for (let k = -3; k <= 3; k++) { put(input.gx + k, input.gy, col); put(input.gx, input.gy + k, col); }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+function put(x, y, c) { if (x >= 0 && x < SW && y >= 0 && y < SH) fb[y * SW + x] = c; }
+
+/* ------------------------------------------------------------------ *
+ * Menu
+ * ------------------------------------------------------------------ */
+const overlay = document.getElementById('overlay');
+const presetsEl = document.getElementById('presets');
+const knobsEl = document.getElementById('knobs');
+const highsEl = document.getElementById('highs');
+const subEl = document.getElementById('sub');
+const playBtn = document.getElementById('play');
+const resumeBtn = document.getElementById('resume');
+const toastEl = document.getElementById('toast');
+const menu = { row: 0, rows: [] };
+const presetBtns = {};
+let customLbl = null;
+const knobRows = {};
+(function buildMenu() {
+  for (const p of PRESET_ORDER) {
+    const b = document.createElement('button'); b.textContent = p.toUpperCase();
+    b.addEventListener('click', () => { applyPreset(p); refreshMenu(); });
+    presetsEl.appendChild(b); presetBtns[p] = b;
+  }
+  customLbl = document.createElement('span'); customLbl.className = 'custom'; presetsEl.appendChild(customLbl);
+  for (const k of KNOBS) {
+    const row = document.createElement('div'); row.className = 'knob';
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = k.label;
+    const minus = document.createElement('button'); minus.textContent = '−';
+    const val = document.createElement('span'); val.className = 'val';
+    const plus = document.createElement('button'); plus.textContent = '+';
+    minus.addEventListener('click', () => { stepKnob(k.key, -1); refreshMenu(); });
+    plus.addEventListener('click', () => { stepKnob(k.key, 1); refreshMenu(); });
+    row.appendChild(lbl); row.appendChild(minus); row.appendChild(val); row.appendChild(plus);
+    knobsEl.appendChild(row); knobRows[k.key] = { row, val };
+  }
+  menu.rows = ['presets'].concat(KNOBS.map(k => k.key), ['play']);
+  drawLogo();
+})();
+function drawLogo() {                    // "CENTIPEDE" in the ROM font, wave-1 colours, with a real centipede under it
+  const lc = document.getElementById('logo').getContext('2d');
+  const li = lc.createImageData(240, 40), l32 = new Uint32Array(li.data.buffer);
+  const word = 'CENTIPEDE', cols = [PAL32[0x0E], PAL32[0x0D]];
+  for (let i = 0; i < word.length; i++) {
+    const t = TILES[chr(word[i])];
+    for (let dy = 0; dy < 8; dy++) for (let dx = 0; dx < 8; dx++) if (t[dy * 8 + dx]) {
+      for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {
+        const X = 48 + i * 16 + dx * 2 + b, Y = 2 + dy * 2 + a; l32[Y * 240 + X] = cols[i & 1];
+      }
+    }
+  }
+  const pens = [0, PAL32[0], PAL32[0x0E], PAL32[0x0D]];     // legs, eyes, body (wave 1)
+  for (let n = 0; n < 12; n++) {
+    const code = n === 0 ? 1 : ((n + 2) & 7);
+    const s = SPR[code];
+    for (let uy = 0; uy < 16; uy++) for (let ux = 0; ux < 8; ux++) {
+      let v = s[uy * 8 + ux]; if (!v) continue;
+      if (n && v === 2) v = 3;                             // body segments have no eyes
+      const X = 208 - n * 8 - 4 + (15 - uy), Y = 30 - ux + 8;
+      if (X >= 0 && X < 240 && Y >= 0 && Y < 40) l32[Y * 240 + X] = pens[v];
+    }
+  }
+  lc.putImageData(li, 0, 0);
+}
+function refreshMenu() {
+  const p = presetName();
+  for (const q of PRESET_ORDER) presetBtns[q].classList.toggle('sel', q === p);
+  customLbl.textContent = p === 'custom' ? 'CUSTOM' : '';
+  presetsEl.classList.toggle('row-sel', menu.rows[menu.row] === 'presets');
+  for (const k of KNOBS) {
+    const r = knobRows[k.key], v = settings[k.key];
+    r.val.textContent = k.fmt ? k.fmt(v) : String(v);
+    r.row.classList.toggle('sel', menu.rows[menu.row] === k.key);
+    r.row.classList.toggle('on', k.key === 'invuln' && v === 1);
+    r.row.classList.toggle('dim', k.key === 'sens' && settings.mouse !== 'lock');
+  }
+  playBtn.classList.toggle('sel', menu.rows[menu.row] === 'play');
+  const parts = PRESET_ORDER.concat(['custom']).map(q => {
+    const h = getHigh(highKey(q, 0)), hn = getHigh(highKey(q, 1));
+    return q.toUpperCase() + ' <b>' + h + '</b>' + (hn !== DEFAULT_TABLE[0][0] ? ' (' + hn + '*)' : '');
+  });
+  highsEl.innerHTML = 'HIGH SCORES: ' + parts.join(' &middot; ') + '<br>* = set with INVULNERABLE on (kept in its own table)';
+  resumeBtn.style.display = (game.sessionOpen && game.paused) ? '' : 'none';
+  if (!game.sessionOpen) { game.table = loadTable(highKey()); if (attract()) { clearScores(); SCORES(); } }
+}
+function showOverlay(text) {
+  subEl.innerHTML = text || '';
+  overlay.classList.remove('hidden'); refreshMenu();
+  canvas.style.cursor = 'default';
+}
+function hideOverlay() { overlay.classList.add('hidden'); canvas.style.cursor = 'none'; }
+function overlayOpen() { return !overlay.classList.contains('hidden'); }
+function showToast(t) { toastEl.textContent = t; toastEl.classList.remove('hidden'); }
+function hideToast() { toastEl.classList.add('hidden'); }
+function toMenu_(why) {
+  let text = 'Move the mouse to steer the shooter, hold the button to fire. Pick a preset, then PLAY.';
+  if (why === 'gameover' && game.lastSummary) {
+    const s = game.lastSummary;
+    text = '<b>GAME OVER</b> &nbsp; SCORE <b>' + s.score + '</b>' + (s.rank ? ' &nbsp; <b>#' + s.rank + ' ON THE TABLE!</b>' : '') +
+      '<br>WAVES CLEARED ' + s.waves + ' &nbsp; SHOTS ' + s.shots + ' &nbsp; CREATURES HIT ' + s.hits +
+      ' &nbsp; ACCURACY ' + s.acc + '% &nbsp; TIME ' + s.secs + 's';
+  } else if (why === 'pause') {
+    text = 'PAUSED &nbsp; RESUME, or change settings and PLAY to restart.';
+  }
+  game.ui = why === 'pause' ? 'play' : 'menu';
+  showOverlay(text);
+}
+function openMenu() {                    // Esc during play
+  if (game.ui !== 'play' || !game.sessionOpen) return;
+  game.paused = true; Sound.silence(); unlockPointer();
+  toMenu_('pause');
+}
+function resume() {
+  hideOverlay();
+  game.paused = false; game.ui = 'play';
+  if (settings.mouse === 'lock') lockPointer();
+}
+function togglePause() {
+  if (game.ui !== 'play' || !game.sessionOpen) return;
+  game.paused = !game.paused;
+  if (game.paused) Sound.silence();
+}
+playBtn.addEventListener('click', () => startPlaying());
+resumeBtn.addEventListener('click', () => resume());
+
+/* ------------------------------------------------------------------ *
+ * Input: the mouse replaces the trackball
+ * ------------------------------------------------------------------ */
+const input = { gx: 120, gy: 248, has: false, fireHeld: false, fireEdge: false, keyFire: false, keyFireEdge: false,
+  left: false, right: false, up: false, down: false, lockX: 0, lockY: 0, initDX: 0 };
+function keyHeld() { return input.left || input.right || input.up || input.down; }
+/* client (CSS pixel) coordinates -> display pixel, through the integer CSS scale */
+function toGame(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const w = r.width || SW, h = r.height || SH;
+  const gx = Math.floor((clientX - r.left) * SW / w), gy = Math.floor((clientY - r.top) * SH / h);
+  return { x: Math.max(0, Math.min(SW - 1, gx)), y: Math.max(0, Math.min(SH - 1, gy)) };
+}
+function aimAt(cx, cy) {
+  const p = toGame(cx, cy);
+  if (input.has) input.initDX += p.x - input.gx;
+  input.gx = p.x; input.gy = p.y; input.has = true;
+}
+function locked() { return document.pointerLockElement === canvas; }
+function lockPointer() { try { if (canvas.requestPointerLock && !locked()) canvas.requestPointerLock(); } catch (e) { /* not available */ } }
+function unlockPointer() { try { if (locked() && document.exitPointerLock) document.exitPointerLock(); } catch (e) { /* not available */ } }
+/* relative motion (pointer lock): CSS pixels -> trackball counts (2 per display pixel) */
+function trackball(mx, my) {
+  const r = canvas.getBoundingClientRect(), k = 2 * (SW / (r.width || SW)) * settings.sens / 100;
+  input.lockX += -mx * k; input.lockY += -my * k;
+  const ix = Math.trunc(input.lockX + Math.sign(input.lockX) * 1e-6), iy = Math.trunc(input.lockY + Math.sign(input.lockY) * 1e-6);
+  input.lockX -= ix; input.lockY -= iy;
+  M.TB += ix; M.TBV += iy;
+}
+function onMove(e) {
+  if (locked()) {
+    if (game.entering) input.initDX += (e.movementX || 0) * SW / (canvas.getBoundingClientRect().width || SW) * settings.sens / 100;
+    else trackball(e.movementX || 0, e.movementY || 0);
+    return;
+  }
+  if (overlayOpen()) return;
+  aimAt(e.clientX, e.clientY);
+}
+canvas.addEventListener('mousemove', onMove);
+window.addEventListener('mousemove', e => { if (e.target !== canvas) onMove(e); });
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (e.preventDefault) e.preventDefault();
+  Sound.init();
+  if (settings.mouse === 'lock' && game.ui === 'play' && !locked()) lockPointer();
+  if (!locked()) aimAt(e.clientX, e.clientY);
+  input.fireHeld = true; input.fireEdge = true;
+});
+window.addEventListener('mouseup', e => { if (e.button === 0) input.fireHeld = false; });
+window.addEventListener('blur', () => { input.fireHeld = false; input.keyFire = false; input.left = input.right = input.up = input.down = false; });
+canvas.addEventListener('contextmenu', e => { if (e.preventDefault) e.preventDefault(); });
+canvas.addEventListener('touchstart', e => {
+  if (e.preventDefault) e.preventDefault();
+  Sound.init();
+  const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+  aimAt(t.clientX, t.clientY); input.fireHeld = true; input.fireEdge = true;
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (e.preventDefault) e.preventDefault();
+  const t = e.changedTouches && e.changedTouches[0]; if (t) aimAt(t.clientX, t.clientY);
+}, { passive: false });
+canvas.addEventListener('touchend', () => { input.fireHeld = false; });
+document.addEventListener('pointerlockchange', () => {
+  if (!locked() && game.ui === 'play' && game.sessionOpen && !game.paused && settings.mouse === 'lock') openMenu();
+});
+const KEYMAP = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', a: 'left', d: 'right', w: 'up', s: 'down', A: 'left', D: 'right', W: 'up', S: 'down' };
+window.addEventListener('keyup', e => {
+  if (KEYMAP[e.key]) input[KEYMAP[e.key]] = false;
+  if (e.key === ' ' || e.key === 'Enter') input.keyFire = false;
+});
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  Sound.init();
+  if (game.entering) {
+    if (k === ' ' || k === 'Enter') { if (!e.repeat) input.keyFireEdge = true; }
+    else if (k === 'ArrowLeft') M.TB += 8;
+    else if (k === 'ArrowRight') M.TB -= 8;
+    else if (k.length === 1 && /[a-z ]/i.test(k)) typeInitial(k);
+    else return;
+    if (e.preventDefault) e.preventDefault();
+    return;
+  }
+  if (k === 'm' || k === 'M') { Sound.setMuted(!Sound.isMuted()); return; }
+  if (overlayOpen()) {
+    const row = menu.rows[menu.row];
+    if (k === 'ArrowDown') { menu.row = (menu.row + 1) % menu.rows.length; refreshMenu(); }
+    else if (k === 'ArrowUp') { menu.row = (menu.row + menu.rows.length - 1) % menu.rows.length; refreshMenu(); }
+    else if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      const d = k === 'ArrowLeft' ? -1 : 1;
+      if (row === 'presets') { let i = PRESET_ORDER.indexOf(presetName()); i = i < 0 ? 0 : Math.max(0, Math.min(3, i + d)); applyPreset(PRESET_ORDER[i]); }
+      else if (KNOB[row]) stepKnob(row, d);
+      refreshMenu();
+    } else if (k >= '1' && k <= '4') { applyPreset(PRESET_ORDER[+k - 1]); refreshMenu(); }
+    else if (k === 'Enter') startPlaying();
+    else if (k === 'Escape' && game.sessionOpen && game.paused) resume();
+    else return;
+    if (e.preventDefault) e.preventDefault();
+    return;
+  }
+  if (KEYMAP[k]) { input[KEYMAP[k]] = true; input.has = false; }
+  else if (k === ' ' || k === 'Enter') { input.keyFire = true; if (!e.repeat) input.fireEdge = true; }
+  else if (k === 'p' || k === 'P') togglePause();
+  else if (k === 'Escape') openMenu();
+  else return;
+  if (e.preventDefault) e.preventDefault();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && game.ui === 'play' && game.sessionOpen && !game.paused) openMenu(); });
+
+/* ------------------------------------------------------------------ *
+ * Layout and main loop (fixed 60 Hz timestep)
+ * ------------------------------------------------------------------ */
+function layout() {
+  const s = Math.max(1, Math.floor(Math.min(window.innerWidth / SW, window.innerHeight / SH)));
+  canvas.style.width = SW * s + 'px'; canvas.style.height = SH * s + 'px';
+  const st = document.getElementById('stage'); st.style.width = SW * s + 'px'; st.style.height = SH * s + 'px';
+  const logo = document.getElementById('logo'); const ls = s >= 3 ? 2 : 1;
+  logo.style.width = 240 * ls + 'px'; logo.style.height = 40 * ls + 'px';
+}
+window.addEventListener('resize', layout);
+
+let last = 0, acc = 0;
+const STEP = 1000 / 60;
+function frame(ts) {
+  if (!last) last = ts;
+  acc += Math.min(250, ts - last); last = ts;
+  let n = 0;
+  while (acc >= STEP && n < 8) { update(); acc -= STEP; n++; }
+  if (n) render();
+  requestAnimationFrame(frame);
+}
+
+loadSettings();
+seed(Date.now() >>> 0);
+bootAttract();
+layout();
+toMenu_('menu');
+render();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

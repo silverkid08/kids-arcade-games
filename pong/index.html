@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>PONG</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", Courier, monospace; font-weight: bold;
+    color: #fff; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  /* The tube: a black glass face with rounded corners, a soft vignette and a
+     phosphor halo around lit pixels.  The pixels themselves are drawn as hard
+     rectangles at device resolution, so nothing is blurred. */
+  #stage { position: relative; background: #050605; border-radius: 22px; overflow: hidden;
+           box-shadow: 0 0 0 3px #0c0c0c, 0 0 0 5px #1b1b1b, 0 0 60px rgba(190,205,255,.07); }
+  canvas#screen { display: block; image-rendering: pixelated; touch-action: none;
+                  filter: drop-shadow(0 0 2px rgba(225,235,255,.55)); }
+  #crt { position: absolute; inset: 0; pointer-events: none; border-radius: 22px;
+         background: radial-gradient(ellipse at 50% 45%, rgba(255,255,255,.035) 0%, rgba(0,0,0,0) 55%, rgba(0,0,0,.5) 100%);
+         box-shadow: inset 0 0 70px rgba(0,0,0,.75); }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; gap: 7px;
+    background: rgba(0,0,0,.86); text-align: center; padding: 10px 12px 12px; overflow-y: auto;
+  }
+  #overlay.hidden { display: none; }
+  #logo { image-rendering: pixelated; margin-top: 4px; }
+  #sub { margin: 0; font-size: 11px; color: #c8ccd6; letter-spacing: 2px; }
+  .lbl { font-size: 10px; color: #9aa3b5; letter-spacing: 1px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+         padding: 2px 6px; border-radius: 5px; border: 1px solid transparent; }
+  .row.sel, .knob.sel { border-color: #ffffff; background: rgba(255,255,255,.07); }
+  .row button, .btnrow button {
+    min-width: 64px; height: 26px; font: inherit; font-size: 11px; letter-spacing: 1px; color: #fff; padding: 0 8px;
+    background: #111; border: 2px solid #777; border-radius: 4px; cursor: pointer;
+  }
+  .row button:hover, .btnrow button:hover { border-color: #fff; }
+  .row button.on { background: #fff; color: #000; border-color: #fff; }
+  .custom { font-size: 11px; color: #ffe08a; letter-spacing: 1px; min-width: 60px; }
+  #names { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  #names label { font-size: 10px; color: #9aa3b5; letter-spacing: 1px; display: flex; gap: 6px; align-items: center; }
+  #names input { width: 100px; height: 24px; font: inherit; font-size: 13px; letter-spacing: 2px; text-transform: uppercase;
+                 color: #fff; background: #000; border: 2px solid #777; border-radius: 4px; padding: 0 6px; }
+  #names input:focus { border-color: #fff; outline: none; }
+  #knobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px 10px; width: 100%; max-width: 760px; }
+  #pknobs { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; width: 100%; max-width: 760px; }
+  .phead { font-size: 11px; letter-spacing: 2px; color: #fff; border-bottom: 1px solid #333; padding: 2px 0; }
+  .knob { display: grid; grid-template-columns: 1fr 24px 128px 24px; align-items: center; gap: 4px;
+          padding: 1px 6px; border-radius: 4px; border: 1px solid transparent; }
+  .knob.dim { opacity: .4; }
+  .knob .lbl { text-align: left; }
+  .knob .val { font-size: 11px; color: #fff; letter-spacing: 1px; }
+  .knob.on .val { color: #ffe08a; }
+  .knob button { width: 24px; height: 22px; font: inherit; font-size: 12px; color: #fff; padding: 0; line-height: 1;
+                 background: #111; border: 2px solid #777; border-radius: 4px; cursor: pointer; }
+  .knob button:hover { border-color: #fff; }
+  #wins { font-size: 10px; color: #b5b9c2; letter-spacing: 1px; line-height: 1.7; max-width: 760px; }
+  #wins b { color: #fff; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #play { font: inherit; font-size: 15px; letter-spacing: 4px; padding: 7px 24px; height: auto; min-width: 120px;
+          color: #000; background: #fff; border: 2px solid #fff; border-radius: 4px; cursor: pointer; }
+  #play:hover, #play.sel { background: #ffe08a; border-color: #ffe08a; }
+  .hint { margin: 0; font-size: 10px; color: #858b97; line-height: 1.8; letter-spacing: 1px; }
+  @media (max-width: 640px) { #pknobs { grid-template-columns: 1fr; } .knob { grid-template-columns: 1fr 24px 110px 24px; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen" width="984" height="738"></canvas>
+  <div id="crt"></div>
+  <div id="overlay">
+    <canvas id="logo" width="172" height="44"></canvas>
+    <p id="sub">ATARI 1972 &middot; TWO PLAYERS ON ONE KEYBOARD</p>
+    <div id="modes" class="row"><span class="lbl">MODE</span></div>
+    <div id="names">
+      <label>LEFT <input id="name0" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+      <label>RIGHT <input id="name1" maxlength="8" spellcheck="false" autocomplete="off" /></label>
+    </div>
+    <div id="presets" class="row"><span class="lbl">PRESET</span></div>
+    <div id="knobs"></div>
+    <div id="pknobs"></div>
+    <div id="wins"></div>
+    <div class="btnrow">
+      <button id="play">PLAY</button>
+      <button id="resume">RESUME</button>
+      <button id="clearwins">CLEAR WINS</button>
+    </div>
+    <p class="hint">LEFT: W / S &nbsp;&middot;&nbsp; RIGHT: &uarr; / &darr; &nbsp;&middot;&nbsp; SPACE start / serve &nbsp;&middot;&nbsp; P pause &nbsp;&middot;&nbsp; M sound &nbsp;&middot;&nbsp; ESC menu<br>
+      touch: drag on your half &nbsp;&middot;&nbsp; menu: &uarr;&darr; pick a row, &larr;&rarr; change it, 1-4 presets, ENTER play</p>
+  </div>
+</div>
+<script>
+/* =====================================================================
+   PONG (Atari, 1972) - a faithful clone for kids, two players on one
+   keyboard or one player against the computer.
+
+   Pong has no CPU and no ROM: it is ~66 TTL chips.  Everything below that
+   decides how the ball moves was transcribed from the Atari schematic as
+   captured in MAME's netlist driver (src/mame/atari/nl_pong.cpp, copy in
+   reference/) and Dr. H. Holden's "Atari Pong E circuit analysis" (copy in
+   reference/).  Chip names in comments (F1, H2, H3, A2, B3, G7, C5 ...) are
+   the board locations used by both.
+
+   Coordinates are the machine's own: one x unit is one 7.159 MHz clock
+   (H counter, 455 per line), one y unit is one scan line (V counter, 262 per
+   frame).  The visible picture is H 81..454 and V 16..261, so x = H - 81
+   and y = V - 16 give a 374 x 246 field.  A frame is 60.05 Hz.
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ---------------- machine constants ---------------- */
+const CLOCK = 7159000, H_TOTAL = 455, V_TOTAL = 262;
+const FPS = CLOCK / H_TOTAL / V_TOTAL;          // 60.05 Hz
+const H_BLANK = 81, V_BLANK = 16;               // ball counters are inhibited for 81 clocks / 16 lines (Holden)
+const SW = H_TOTAL - H_BLANK;                   // 374 visible clocks
+const SH = V_TOTAL - V_BLANK;                   // 246 visible lines
+const NET_X = 256 - H_BLANK;                    // net: first clock of 256H (F3/G3/G2), 1 clock wide
+const PAD_X = [128 - H_BLANK, 384 - H_BLANK];   // paddles: 128H (+256H) gated by H3 for 4 clocks
+const PAD_W = 4, BALL_W = 4, BALL_H = 4, PAD_H = 15;
+const SERVE_X = 262 - H_BLANK;                  // ball re-appears 508 counts after PAD1 -> H 262 (just right of the net)
+const SCORE_Y = 32 - V_BLANK;                   // score window V 32..63 (C5 enable)
+const DIGIT_X = [[144 - H_BLANK, 176 - H_BLANK], [336 - H_BLANK, 368 - H_BLANK]];  // [player][tens, ones]
+const SERVE_FRAMES = Math.round(1.1 * 330e3 * 4.7e-6 * FPS);   // serve 555 (F4): 330k, 4.7uF -> 1.71 s
+const SC_FRAMES = Math.round(1.1 * 220e3 * 1e-6 * FPS);        // score-sound 555 (G4): 220k, 1uF -> 0.24 s
+const LINE_HZ = CLOCK / H_TOTAL;                // 15734 Hz
+const HIT_HZ = LINE_HZ / 32;                    // VPOS16 -> 491.7 Hz
+const LOW_HZ = LINE_HZ / 64;                    // VPOS32 -> 245.9 Hz (wall bounce and score)
+const HSPEED = [2, 3, 4];                       // move-lines per frame from H2 for hit count <4, 4-11, 12
+const PAD_TOP_GAP = 10, PAD_BOTTOM_LIMIT = SH - 6;   // the arcade's limited paddle reach (see README)
+const KEY_SPEED = 4;                            // keyboard paddle speed (lines per frame) at 100%
+
+/* Seven-segment patterns of the 7448 decoder (C5).  The 7448 draws 6 and 9
+   without their tails, and code 15 is blank (the leading "1" trick). */
+const SEG7 = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'cdefg', 'abc', 'abcdefg', 'abcfg'];
+/* Segment rectangles inside the 16 x 32 digit (gate array D4/D5/C4/E5). */
+const SEG_RECT = { a: [0, 0, 16, 4], b: [12, 0, 4, 16], c: [12, 16, 4, 16], d: [0, 28, 16, 4],
+                   e: [0, 16, 4, 16], f: [0, 0, 4, 16], g: [0, 12, 16, 4] };
+
+const WHITE = '#f4f7ff', SCORE_C = '#cdd1da', DIM = '#8d929c';   // score mixes through 1.2k vs 1k: ~83%
+
+/* 5 x 7 font for the few messages drawn on the tube (hex rows, bit 4 = left). */
+const FONT_HEX = {
+  A: '0E1111111F1111', B: '1E11111E11111E', C: '0E11101010110E', D: '1C12111111121C', E: '1F10101E10101F',
+  F: '1F10101E101010', G: '0E11101711110F', H: '1111111F111111', I: '0E04040404040E', J: '0702020202120C',
+  K: '11121418141211', L: '1010101010101F', M: '111B1515111111', N: '11111915131111', O: '0E11111111110E',
+  P: '1E11111E101010', Q: '0E11111115120D', R: '1E11111E141211', S: '0F10100E01011E', T: '1F040404040404',
+  U: '1111111111110E', V: '11111111110A04', W: '1111111515150A', X: '11110A040A1111', Y: '1111110A040404',
+  Z: '1F01020408101F', 0: '0E11131519110E', 1: '040C040404040E', 2: '0E11010204081F', 3: '1F02040201110E',
+  4: '02060A121F0202', 5: '1F101E0101110E', 6: '0608101E11110E', 7: '1F010204080808', 8: '0E11110E11110E',
+  9: '0E11110F01020C', ' ': '00000000000000', '.': '00000000000C0C', ',': '000000000C0408', '!': '04040404040004',
+  '?': '0E110102040004', ':': '000C0C000C0C00', '-': '0000001F000000', '/': '00010204081000', "'": '0C040800000000',
+  '*': '0004150E150400', '+': '0004041F040400', '(': '02040808080402', ')': '08040202020408', '^': '040E1504040404',
+  '_': '04040404150E04', '=': '00001F001F0000', '<': '02040810080402', '>': '08040201020408'
+};
+const FONT = {};
+for (const ch in FONT_HEX) { const h = FONT_HEX[ch]; FONT[ch] = []; for (let i = 0; i < 7; i++) FONT[ch].push(parseInt(h.substr(i * 2, 2), 16)); }
+
+/* ---------------- tiny seeded RNG (tests use seed()) ---------------- */
+let rngState = (Date.now() >>> 0) || 1;
+function seed(s) { rngState = (s >>> 0) || 1; }
+function rnd() {
+  rngState = (rngState + 0x6D2B79F5) >>> 0;
+  let t = rngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+/* ---------------- settings, presets, knobs ---------------- */
+const LS = 'pong.';
+const MODES = [['2p', '2 PLAYERS'], ['cpuR', 'VS CPU (YOU LEFT)'], ['cpuL', 'VS CPU (YOU RIGHT)']];
+const KNOBS = [
+  { key: 'cpu', label: 'CPU SKILL', opts: [1, 2, 3, 4, 5], fmt: v => ['1 ROOKIE', '2 EASY', '3 STEADY', '4 GOOD', '5 ACE'][v - 1] },
+  { key: 'ballSpeed', label: 'BALL SPEED', opts: [50, 60, 70, 80, 90, 100, 110, 125, 150], fmt: v => v + '%' },
+  { key: 'speedup', label: 'BALL SPEEDS UP', opts: ['arcade', 'gradual', 'off'], fmt: v => ({ arcade: 'ARCADE', gradual: 'AT 4 / 12 HITS', off: 'NEVER' })[v] },
+  { key: 'points', label: 'POINTS TO WIN', opts: [5, 11, 15, 0], fmt: v => v ? String(v) : 'ENDLESS' },
+  { key: 'serve', label: 'SERVE', opts: ['auto', 'wait'], fmt: v => v === 'auto' ? 'ARCADE (AUTO)' : 'PRESS TO SERVE' },
+  { key: 'walls', label: 'ANGLES / WALLS', opts: ['bounce', 'gentle', 'flat'], fmt: v => ({ bounce: 'ARCADE', gentle: 'GENTLE', flat: 'FLAT: NO WALLS' })[v] },
+  { key: 'reach', label: 'PADDLE REACH', opts: ['gap', 'full'], fmt: v => v === 'gap' ? 'ARCADE GAP' : 'WHOLE SCREEN' }
+];
+const PKNOBS = [
+  { key: 'control', label: 'CONTROL', opts: ['keys', 'mouse'], fmt: (v, s) => v === 'mouse' ? 'MOUSE' : (s ? 'KEYS ↑ ↓' : 'KEYS W S') },
+  { key: 'size', label: 'PADDLE SIZE', opts: [15, 20, 26, 34, 44, 60], fmt: v => v === 15 ? '15 (ARCADE)' : v + ' LINES' },
+  { key: 'speed', label: 'PADDLE SPEED', opts: [50, 75, 100, 125, 150, 200], fmt: v => v + '%' },
+  { key: 'bumper', label: 'BUMPER WALL', opts: [false, true], fmt: v => v ? 'ON' : 'OFF' }
+];
+const PRESET_ORDER = ['kid', 'easy', 'normal', 'original'];
+const PRESETS = {
+  kid:      { cpu: 1, ballSpeed: 60,  speedup: 'off',     points: 5,  serve: 'wait', walls: 'gentle', reach: 'full', size: 34, speed: 100, bumper: false },
+  easy:     { cpu: 2, ballSpeed: 80,  speedup: 'gradual', points: 11, serve: 'wait', walls: 'bounce', reach: 'full', size: 20, speed: 100, bumper: false },
+  normal:   { cpu: 3, ballSpeed: 100, speedup: 'gradual', points: 11, serve: 'auto', walls: 'bounce', reach: 'full', size: 15, speed: 100, bumper: false },
+  original: { cpu: 3, ballSpeed: 100, speedup: 'arcade',  points: 11, serve: 'auto', walls: 'bounce', reach: 'gap',  size: 15, speed: 100, bumper: false }
+};
+const GLOBAL_PRESET_KEYS = ['cpu', 'ballSpeed', 'speedup', 'points', 'serve', 'walls', 'reach'];
+const PLAYER_PRESET_KEYS = ['size', 'speed', 'bumper'];
+const DEFAULT_NAMES = ['PLAYER 1', 'PLAYER 2'];
+
+function defaultSettings() {
+  const s = { mode: '2p', muted: false, p: [{ name: '', control: 'keys' }, { name: '', control: 'keys' }] };
+  applyPresetTo(s, 'normal');
+  return s;
+}
+function applyPresetTo(s, name) {
+  const P = PRESETS[name];
+  for (const k of GLOBAL_PRESET_KEYS) s[k] = P[k];
+  for (const pl of s.p) for (const k of PLAYER_PRESET_KEYS) pl[k] = P[k];
+}
+const settings = defaultSettings();
+
+function applyPreset(name) { applyPresetTo(settings, name); saveSettings(); }
+function presetName() {
+  for (const n of PRESET_ORDER) {
+    const P = PRESETS[n];
+    if (GLOBAL_PRESET_KEYS.every(k => settings[k] === P[k]) &&
+        settings.p.every(pl => PLAYER_PRESET_KEYS.every(k => pl[k] === P[k]))) return n;
+  }
+  return 'custom';
+}
+/* knob ids: 'ballSpeed' for globals, 'L.size' / 'R.bumper' for per-player */
+function knobDef(id) {
+  if (id.indexOf('.') > 0) return PKNOBS.find(k => k.key === id.split('.')[1]);
+  return KNOBS.find(k => k.key === id);
+}
+function getKnob(id) {
+  if (id.indexOf('.') > 0) { const [side, k] = id.split('.'); return settings.p[side === 'L' ? 0 : 1][k]; }
+  return settings[id];
+}
+function setKnob(id, v) {
+  const def = knobDef(id);
+  if (!def || def.opts.indexOf(v) < 0) return false;
+  if (id.indexOf('.') > 0) {
+    const [side, k] = id.split('.'); const s = side === 'L' ? 0 : 1;
+    settings.p[s][k] = v;
+    if (k === 'control' && v === 'mouse') settings.p[1 - s].control = 'keys';   // one mouse, one paddle
+  } else settings[id] = v;
+  saveSettings();
+  return true;
+}
+function stepKnob(id, dir) {
+  const def = knobDef(id), i = def.opts.indexOf(getKnob(id));
+  return setKnob(id, def.opts[clamp(i + dir, 0, def.opts.length - 1)]);
+}
+function cleanName(n) { return String(n || '').toUpperCase().replace(/[^A-Z0-9 .!'-]/g, '').slice(0, 8).trim(); }
+function setName(side, n) { settings.p[side].name = cleanName(n); saveSettings(); }
+function saveSettings() { try { localStorage.setItem(LS + 'settings', JSON.stringify(settings)); } catch (e) { /* no storage */ } }
+function loadSettings() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(LS + 'settings') || 'null'); } catch (e) { raw = null; }
+  const d = defaultSettings();
+  Object.assign(settings, d, { p: d.p });
+  if (!raw || typeof raw !== 'object') return;
+  if (MODES.some(m => m[0] === raw.mode)) settings.mode = raw.mode;
+  settings.muted = !!raw.muted;
+  for (const k of KNOBS) if (raw[k.key] !== undefined && k.opts.indexOf(raw[k.key]) >= 0) settings[k.key] = raw[k.key];
+  if (Array.isArray(raw.p)) for (let s = 0; s < 2; s++) {
+    const rp = raw.p[s]; if (!rp) continue;
+    for (const k of PKNOBS) if (rp[k.key] !== undefined && k.opts.indexOf(rp[k.key]) >= 0) settings.p[s][k.key] = rp[k.key];
+    settings.p[s].name = cleanName(rp.name);
+  }
+  if (settings.p[0].control === 'mouse' && settings.p[1].control === 'mouse') settings.p[1].control = 'keys';
+}
+function isCpu(s) { return (settings.mode === 'cpuR' && s === 1) || (settings.mode === 'cpuL' && s === 0); }
+function playerName(s) { return isCpu(s) ? 'CPU' : (settings.p[s].name || DEFAULT_NAMES[s]); }
+
+/* ---------------- win records ---------------- */
+const wins = { session: {}, all: {} };
+function loadWins() { try { wins.all = JSON.parse(localStorage.getItem(LS + 'wins') || '{}') || {}; } catch (e) { wins.all = {}; } }
+function saveWins() { try { localStorage.setItem(LS + 'wins', JSON.stringify(wins.all)); } catch (e) { /* no storage */ } }
+/* A win by a player who had the bumper wall on is counted separately (shown with *),
+   so a protected win never inflates the real tally. */
+function recordWin(name, assisted) {
+  const k = assisted ? name + '*' : name;
+  wins.session[k] = (wins.session[k] || 0) + 1;
+  wins.all[k] = (wins.all[k] || 0) + 1;
+  saveWins();
+}
+function clearWins() { wins.session = {}; wins.all = {}; saveWins(); }
+
+/* ---------------- sound: three square-wave tones, like the TTL speaker ---------------- */
+const Sound = {
+  ctx: null, log: [], master: null,
+  init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { this.ctx = new AC(); this.master = this.ctx.createGain(); this.master.gain.value = 0.11; this.master.connect(this.ctx.destination); }
+    catch (e) { this.ctx = null; }
+  },
+  tone(name, hz, secs) {
+    this.log.push(name);
+    if (this.log.length > 200) this.log.splice(0, 100);
+    if (settings.muted || !this.ctx) return;
+    try {
+      const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = 'square'; o.frequency.value = hz;
+      g.gain.setValueAtTime(1, t); g.gain.setValueAtTime(1, t + secs - 0.002); g.gain.linearRampToValueAtTime(0, t + secs);
+      o.connect(g); g.connect(this.master); o.start(t); o.stop(t + secs + 0.01);
+    } catch (e) { /* ignore */ }
+  },
+  hit() { this.tone('hit', HIT_HZ, 1 / FPS); },          // C2 gates VPOS16 until VPOS256: ~one frame
+  wall() { this.tone('wall', LOW_HZ, 1 / FPS); },        // F3 gates VPOS32 for one frame
+  score() { this.tone('score', LOW_HZ, SC_FRAMES / FPS); },  // G4 555 gates VPOS32 for 0.24 s
+  bumper() { this.tone('bumper', LOW_HZ, 2 / FPS); }
+};
+
+/* ---------------- game state ---------------- */
+const game = {
+  mode: 'attract',      // 'attract' (no paddles, ball bounces silently: the arcade's idle mode) or 'play'
+  over: false, winner: -1, paused: false, frame: 0,
+  score: [0, 0],
+  x: SERVE_X,           // ball left edge (clock units)
+  dir: 1,               // H3: +1 = moving right, -1 = moving left
+  hacc: 0,
+  vc: 100,              // vertical ball counter (B3/A3) value on the last visible line
+  seg: 3,               // latched paddle segment (A5/B5)
+  rev: 0,               // A2: vertical reversal flip-flop
+  vacc: 0, dy: 0,
+  hidden: false,        // Serve: horizontal ball counter held reset
+  serveT: 0, serveReq: false,
+  speedCount: 0,        // F1 hit counter (stops at 12)
+  hitSoundOn: false,    // C2
+  scT: 0, scHigh: false,// G4 score-sound 555
+  pad: [{ y: 100, h: PAD_H }, { y: 100, h: PAD_H }],
+  rows: [], ballY: 100,
+  flash: [0, 0], toast: '', toastT: 0,
+  rally: 0, lastHit: -1, hits: [0, 0],
+  cpu: [{ target: 115, delay: 0, err: 0, coming: false }, { target: 115, delay: 0, err: 0, coming: false }]
+};
+
+/* ---------------- input ---------------- */
+const keys = new Set();
+const mouse = { y: null, x: null };
+const touchSide = {};               // touch identifier -> side
+const touchTarget = [null, null];   // y target per side while a finger is down
+
+function sideKeys(s) {
+  // vs CPU: the human may use either key set
+  if (settings.mode !== '2p') return { up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'] };
+  return s === 0 ? { up: ['KeyW'], down: ['KeyS'] } : { up: ['ArrowUp'], down: ['ArrowDown'] };
+}
+function keyDir(s) {
+  const k = sideKeys(s);
+  return (k.down.some(c => keys.has(c)) ? 1 : 0) - (k.up.some(c => keys.has(c)) ? 1 : 0);
+}
+function padRange(h) {
+  if (settings.reach === 'gap') return [PAD_TOP_GAP, Math.max(PAD_TOP_GAP, PAD_BOTTOM_LIMIT - h)];
+  return [0, Math.max(0, SH - h)];
+}
+function movePaddles() {
+  for (let s = 0; s < 2; s++) {
+    const P = settings.p[s], pad = game.pad[s];
+    pad.h = P.size;
+    const [lo, hi] = padRange(pad.h);
+    if (isCpu(s)) cpuMove(s, lo, hi);
+    else if (touchTarget[s] !== null) pad.y = touchTarget[s] - pad.h / 2;
+    else if (P.control === 'mouse' && mouse.y !== null) pad.y = mouse.y - pad.h / 2;   // absolute, like the knob
+    else pad.y += keyDir(s) * KEY_SPEED * P.speed / 100;
+    pad.y = clamp(pad.y, lo, hi);
+  }
+}
+
+/* ---------------- the computer player ---------------- */
+const CPU_LEVELS = [
+  { react: 26, speed: 0.40, err: 20, aim: 0 },
+  { react: 18, speed: 0.55, err: 13, aim: 0 },
+  { react: 11, speed: 0.75, err: 7,  aim: 0.2 },
+  { react: 6,  speed: 0.90, err: 4,  aim: 0.5 },
+  { react: 3,  speed: 1.00, err: 1,  aim: 0.8 }
+];
+function reflectY(y) {
+  const span = SH - BALL_H, period = span * 2;
+  let m = ((y % period) + period) % period;
+  return m <= span ? m : period - m;
+}
+function predictBallY(s) {
+  const n = HSPEED[speedTier()] * settings.ballSpeed / 100;
+  const dist = s === 1 ? PAD_X[1] - (game.x + BALL_W) : game.x - (PAD_X[0] + PAD_W);
+  const frames = Math.max(0, dist / Math.max(0.5, n));
+  return reflectY(game.ballY + game.dy * settings.ballSpeed / 100 * frames);
+}
+function cpuMove(s, lo, hi) {
+  const L = CPU_LEVELS[settings.cpu - 1], c = game.cpu[s], pad = game.pad[s];
+  const coming = game.mode === 'play' && !game.hidden && game.dir === (s === 1 ? 1 : -1);
+  if (coming && !c.coming) {             // ball just turned toward us: hesitate, pick an error and an aim
+    c.delay = L.react;
+    c.err = (rnd() * 2 - 1) * L.err;
+    c.aim = rnd() < L.aim ? (rnd() < 0.5 ? -1 : 1) * pad.h * 0.32 : 0;
+  }
+  c.coming = coming;
+  if (coming) {
+    if (c.delay > 0) c.delay--;
+    else if ((game.frame % 4) === 0 || c.target === undefined) c.target = predictBallY(s) + BALL_H / 2 - pad.h / 2 + c.err + c.aim;
+  } else if (game.frame % 20 === 0) c.target = (SH - pad.h) / 2;
+  const maxStep = KEY_SPEED * settings.p[s].speed / 100 * L.speed;
+  const d = c.target - pad.y;
+  if (Math.abs(d) > 1) pad.y += clamp(d, -maxStep, maxStep);
+}
+
+/* ---------------- ball logic ---------------- */
+function speedTier() {
+  if (settings.speedup === 'off') return 0;
+  const c = game.speedCount;
+  return c < 4 ? 0 : c < 12 ? 1 : 2;
+}
+/* Vertical velocity encoder: latched segment bits (inverted by A6/B6) pass the
+   A2-controlled XORs into the 7483 adder, which adds 6 or 7.  Result 7..13 is
+   the 9316 load value; 10 is no vertical motion, 13 is 3 lines/frame up. */
+function encodeV(seg, rev) {
+  const d = seg >= 4 ? 1 : 0;
+  return rev ? seg + 6 + (1 - d) : 13 - seg + d;
+}
+/* Called when the vertical counter wraps past 255: returns the value it loads. */
+function loadValue() {
+  let dy = 10 - encodeV(game.seg, game.rev);           // lines per frame, + = down
+  if (settings.walls === 'gentle') dy = clamp(dy, -1, 1);
+  else if (settings.walls === 'flat') dy = 0;
+  game.dy = dy;
+  game.vacc += dy * settings.ballSpeed / 100;
+  const step = Math.round(game.vacc);
+  game.vacc -= step;
+  return 10 - step;
+}
+function padSegment(pad, line) {
+  const i = line - Math.round(pad.y);
+  const count = Math.floor(i * PAD_H / pad.h);          // the paddle's 7493 (B8/A8) line count 0..14
+  return count >> 1;                                     // QA unused: 8 segments, B C D
+}
+function checkHit(line) {
+  for (let s = 0; s < 2; s++) {
+    const pad = game.pad[s], top = Math.round(pad.y);
+    if (line < top || line >= top + pad.h) continue;
+    if (game.x + BALL_W <= PAD_X[s] || game.x >= PAD_X[s] + PAD_W) continue;
+    // HIT clocks the bat data into A5/B5 on every overlapping line (last one wins),
+    // clears A2 and sets / clears H3.
+    game.seg = padSegment(pad, line);
+    game.rev = 0;
+    const newDir = s === 0 ? 1 : -1;
+    if (!game.hitSoundOn) {
+      game.hitSoundOn = true;
+      Sound.hit();
+      if (settings.speedup === 'arcade') game.speedCount = Math.min(12, game.speedCount + 8);   // F1 counts HIT SOUND cycles
+      else if (settings.speedup === 'gradual') game.speedCount = Math.min(12, game.speedCount + 1);
+      if (game.dir !== newDir || game.lastHit !== s) { game.rally++; game.hits[s]++; }
+      game.lastHit = s;
+    }
+    game.dir = newDir;
+  }
+}
+function miss(side) {
+  const rising = !game.scHigh;           // G4 555 fires on the first line of the miss
+  if (rising) game.scT = SC_FRAMES;
+  game.scHigh = true;
+  if (game.mode !== 'play') {           // attract: SC clocks H3 so the ball bounces off the blanking
+    if (rising) game.dir = -game.dir;
+    game.speedCount = 0;
+    return;
+  }
+  if (settings.p[side].bumper) {        // the kid's bumper: bounce off the back wall instead of scoring
+    game.dir = side === 0 ? 1 : -1;
+    game.x = side === 0 ? 0 : SW - BALL_W;
+    game.speedCount = 0;
+    game.flash[side] = 14;
+    Sound.bumper();
+    return;
+  }
+  game.speedCount = 0;                  // MISS resets F1 (RSTSPEED)
+  const scorer = 1 - side;
+  game.score[scorer]++;
+  Sound.score();
+  game.rally = 0; game.lastHit = -1;
+  const pts = settings.points;
+  if (pts && game.score[scorer] >= pts) { gameOver(scorer); return; }
+  // Serve: the ball vanishes for the 555's 1.7 s, keeping its direction, so it is
+  // served toward the player who missed.  Its vertical motion carries on unseen.
+  game.hidden = true;
+  game.serveT = SERVE_FRAMES;
+  game.serveReq = false;
+}
+function receiver() { return game.dir > 0 ? 1 : 0; }
+function gameOver(winner) {
+  game.mode = 'attract'; game.over = true; game.winner = winner;
+  game.hidden = false; game.x = SERVE_X;
+  recordWin(playerName(winner), !!settings.p[winner].bumper);
+  refreshMenu();
+}
+function startGame() {
+  Sound.init();
+  game.mode = 'play'; game.over = false; game.winner = -1; game.paused = false;
+  game.score = [0, 0]; game.speedCount = 0; game.rally = 0; game.lastHit = -1; game.hits = [0, 0];
+  game.hidden = true; game.serveT = SERVE_FRAMES; game.serveReq = false;   // coin: SRST starts the serve timer too
+  game.scT = 0; game.scHigh = false; game.flash = [0, 0];
+  for (let s = 0; s < 2; s++) { game.pad[s].h = settings.p[s].size; game.pad[s].y = (SH - game.pad[s].h) / 2; game.cpu[s].coming = false; }
+}
+function requestServe(side) {
+  if (game.mode === 'play' && game.hidden && (side === undefined || side === receiver())) game.serveReq = true;
+}
+
+/* One frame of the machine.  Order follows the raster: lines V 0..3 move the
+   ball horizontally (H2 'move' window, inside vertical blanking), V 16 checks
+   for a top/bottom bounce (A2 clocked as VBLANK ends), then the 246 visible
+   lines run the vertical counter, draw the ball and detect hits. */
+function update() {
+  if (game.paused) return;
+  game.frame++;
+  movePaddles();
+
+  // --- horizontal motion during the move window
+  let missSide = -1;
+  if (!game.hidden) {
+    game.hacc += HSPEED[speedTier()] * settings.ballSpeed / 100;
+    const n = Math.floor(game.hacc + 1e-9);
+    game.hacc -= n;
+    game.x += game.dir * n;
+    if (game.mode !== 'play') {         // attract: the counter just keeps running round the line
+      if (game.x >= SW) game.x -= H_TOTAL;
+      if (game.x < -H_BLANK) game.x += H_TOTAL;
+    }
+    if (game.x < 0) missSide = 0; else if (game.x + BALL_W > SW) missSide = 1;   // HVID meets HBLANK
+  }
+  if (missSide >= 0) miss(missSide);
+  else game.scHigh = game.scT > 0;
+  if (game.scT > 0) game.scT--;
+
+  // --- serve timer
+  if (game.mode === 'play' && game.hidden) {
+    if (game.serveT > 0) game.serveT--;
+    if (game.serveT === 0) {
+      const waiting = settings.serve === 'wait' && !isCpu(receiver()) && !game.serveReq;
+      if (!waiting) { game.hidden = false; game.x = SERVE_X; game.hacc = 0; game.serveReq = false; }
+    }
+  }
+
+  // --- V16: bounce if the ball is still lit when blanking ends
+  if (game.vc >= 252) {
+    game.rev ^= 1;
+    if (game.mode === 'play' && !game.hidden) Sound.wall();
+  }
+
+  // --- the visible lines
+  game.rows.length = 0;
+  let top = null;
+  for (let line = 0; line < SH; line++) {
+    game.vc = game.vc >= 255 ? loadValue() : game.vc + 1;
+    if (game.vc === 240) game.hitSoundOn = false;        // VPOS256 rises: C2 ends the hit sound
+    if (game.vc >= 252) {
+      game.rows.push(line);
+      if (game.vc === 252) top = line;
+      if (game.mode === 'play' && !game.hidden) checkHit(line);
+    }
+  }
+  if (top !== null) game.ballY = top;
+  else if (game.rows.length) game.ballY = game.rows[0] === 0 ? game.rows[game.rows.length - 1] - 3 : game.rows[0];
+
+  for (let s = 0; s < 2; s++) if (game.flash[s] > 0) game.flash[s]--;
+  if (game.toastT > 0) game.toastT--;
+}
+
+/* ---------------- rendering ---------------- */
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+let sx = canvas.width / SW, sy = canvas.height / SH;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const availW = (window.innerWidth - 16) * dpr, availH = (window.innerHeight - 16) * dpr;
+  const k = Math.max(1, Math.floor(Math.min(availH / SH, availW / (SH * 4 / 3))));
+  canvas.height = SH * k;
+  canvas.width = Math.round(SH * k * 4 / 3);         // a 4:3 tube: pixels are 0.88 as wide as tall
+  canvas.style.width = (canvas.width / dpr) + 'px';
+  canvas.style.height = (canvas.height / dpr) + 'px';
+  sx = canvas.width / SW; sy = canvas.height / SH;
+}
+function rect(x, y, w, h) {
+  const X0 = Math.round(x * sx), X1 = Math.round((x + w) * sx), Y0 = Math.round(y * sy), Y1 = Math.round((y + h) * sy);
+  if (X1 > X0 && Y1 > Y0) ctx.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+}
+function drawDigit(d, x, y) {
+  for (const s of SEG7[d]) { const r = SEG_RECT[s]; rect(x + r[0], y + r[1], r[2], r[3]); }
+}
+function drawScore(p) {
+  const v = game.score[p], X = DIGIT_X[p];
+  drawDigit(v % 10, X[1], SCORE_Y);
+  if (v >= 10) drawDigit(Math.floor(v / 10) % 10, X[0], SCORE_Y);
+  if (v >= 100) drawDigit(Math.floor(v / 100) % 10, X[0] - 32, SCORE_Y);   // endless mode only
+}
+function textWidth(str, scale) { return str.length * 6 * scale - scale; }
+function drawText(str, x, y, scale, color, align) {
+  scale = scale || 1;
+  str = String(str).toUpperCase();
+  if (align === 'center') x = Math.round(x - textWidth(str, scale) / 2);
+  else if (align === 'right') x = x - textWidth(str, scale);
+  if (color) ctx.fillStyle = color;
+  for (let i = 0; i < str.length; i++) {
+    const g = FONT[str[i]] || FONT['?'];
+    for (let r = 0; r < 7; r++) {
+      const bits = g[r]; let c = 0;
+      while (c < 5) {                                  // merge horizontal runs
+        if (bits & (16 >> c)) { let e = c; while (e < 5 && (bits & (16 >> e))) e++; rect(x + (i * 6 + c) * scale, y + r * scale, (e - c) * scale, scale); c = e; }
+        else c++;
+      }
+    }
+  }
+}
+function keyLabel(s) {
+  if (settings.p[s].control === 'mouse') return 'CLICK';
+  if (settings.mode !== '2p') return 'W/S OR ^/_';
+  return s === 0 ? 'W OR S' : '^ OR _';
+}
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, H);
+
+  // net: one clock wide at 256H, lit while 4V is low -> 4 lines on, 4 off
+  ctx.fillStyle = WHITE;
+  for (let y = 0; y < SH; y += 8) rect(NET_X, y, 1, 4);
+
+  ctx.fillStyle = SCORE_C;
+  drawScore(0); drawScore(1);
+
+  ctx.fillStyle = WHITE;
+  if (game.mode === 'play') for (let s = 0; s < 2; s++) rect(PAD_X[s], Math.round(game.pad[s].y), PAD_W, game.pad[s].h);
+
+  if (!game.hidden) {
+    const r = game.rows;
+    for (let i = 0; i < r.length;) {                   // usually one 4-line run, two when it straddles blanking
+      let j = i; while (j + 1 < r.length && r[j + 1] === r[j] + 1) j++;
+      rect(game.x, r[i], BALL_W, r[j] - r[i] + 1);
+      i = j + 1;
+    }
+  }
+
+  // ---- kid-friendly additions (not on the arcade tube)
+  for (let s = 0; s < 2; s++) {
+    if (settings.p[s].bumper && game.mode === 'play') {
+      drawText('BUMPER', s === 0 ? 4 : SW - 4, SH - 10, 1, DIM, s === 0 ? 'left' : 'right');
+      if (game.flash[s] > 0 && (game.flash[s] & 2)) { ctx.fillStyle = WHITE; for (let y = 0; y < SH; y += 4) rect(s === 0 ? 0 : SW - 2, y, 2, 2); }
+    }
+  }
+  if (game.mode === 'play' && game.hidden && game.serveT === 0 && !isCpu(receiver())) {
+    const s = receiver(), cx = s === 0 ? NET_X / 2 : (NET_X + SW) / 2;
+    drawText(playerName(s), cx, 150, 1, DIM, 'center');
+    drawText(keyLabel(s) + ' TO SERVE', cx, 162, 1, DIM, 'center');
+  }
+  if (game.mode === 'play' && game.hidden && game.serveT > 0 && game.score[0] + game.score[1] === 0) {
+    drawText(playerName(0), NET_X / 2, SH - 22, 1, DIM, 'center');
+    drawText(playerName(1), (NET_X + SW) / 2, SH - 22, 1, DIM, 'center');
+  }
+  if (game.over && !menuOpen) {
+    const cx = game.winner === 0 ? NET_X / 2 : (NET_X + SW) / 2;     // on the winner's half, clear of the net
+    drawText(playerName(game.winner), cx, 92, 2, WHITE, 'center');
+    drawText('WINS!', cx, 112, 2, WHITE, 'center');
+    drawText('SPACE: PLAY AGAIN', cx, 140, 1, DIM, 'center');
+    drawText('ESC: MENU', cx, 152, 1, DIM, 'center');
+  }
+  if (game.paused && !menuOpen) {
+    drawText('PAUSED', NET_X / 2, 108, 2, WHITE, 'center');
+    drawText('P TO PLAY ON', (NET_X + SW) / 2, 112, 1, DIM, 'center');
+  }
+  if (game.toastT > 0) drawText(game.toast, NET_X, SH - 12, 1, DIM, 'center');
+
+  // scanlines: darken the last device row of each line, only where something is lit
+  if (sy >= 3) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    for (let y = 1; y <= SH; y++) ctx.fillRect(0, Math.round(y * sy) - 1, W, 1);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+/* ---------------- logo: PONG built from the score segments ---------------- */
+function drawLogo() {
+  const lc = document.getElementById('logo'), g = lc.getContext('2d');
+  const letters = ['abefg', 'abcdef', 'abcef', 'acdef'];   // P O N G
+  g.clearRect(0, 0, lc.width, lc.height);
+  g.fillStyle = WHITE;
+  const k = 1.3;
+  letters.forEach((segs, i) => {
+    for (const s of segs) { const r = SEG_RECT[s]; g.fillRect(Math.round(6 + i * 42 + r[0] * k * 1.25), Math.round(2 + r[1] * k), Math.round(r[2] * k * 1.25), Math.round(r[3] * k)); }
+  });
+}
+
+/* ---------------- menu ---------------- */
+let menuOpen = true, menuSel = 0, menuRows = [];
+const $ = id => document.getElementById(id);
+const overlay = $('overlay');
+
+function makeKnobRow(id, side) {
+  const def = knobDef(id);
+  const el = document.createElement('div'); el.className = 'knob';
+  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = def.label;
+  const dn = document.createElement('button'); dn.textContent = '◀';
+  const val = document.createElement('span'); val.className = 'val';
+  const up = document.createElement('button'); up.textContent = '▶';
+  dn.addEventListener('click', () => { stepKnob(id, -1); refreshMenu(); });
+  up.addEventListener('click', () => { stepKnob(id, 1); refreshMenu(); });
+  el.appendChild(lbl); el.appendChild(dn); el.appendChild(val); el.appendChild(up);
+  return { el, id, side, val, change: d => { stepKnob(id, d); refreshMenu(); } };
+}
+let knobRows = [], modeButtons = [], presetButtons = [], customEl = null;
+function buildMenu() {
+  const modes = $('modes');
+  MODES.forEach(([m, label]) => {
+    const b = document.createElement('button'); b.textContent = label; b.dataset.mode = m;
+    b.addEventListener('click', () => { settings.mode = m; saveSettings(); refreshMenu(); });
+    modes.appendChild(b); modeButtons.push(b);
+  });
+  const pr = $('presets');
+  PRESET_ORDER.forEach((p, i) => {
+    const b = document.createElement('button'); b.textContent = (i + 1) + ' ' + p.toUpperCase(); b.dataset.preset = p;
+    b.addEventListener('click', () => { applyPreset(p); refreshMenu(); });
+    pr.appendChild(b); presetButtons.push(b);
+  });
+  customEl = document.createElement('span'); customEl.className = 'custom'; pr.appendChild(customEl);
+  const kn = $('knobs');
+  for (const k of KNOBS) { const r = makeKnobRow(k.key); kn.appendChild(r.el); knobRows.push(r); }
+  const pk = $('pknobs');
+  const heads = [document.createElement('div'), document.createElement('div')];
+  heads[0].className = heads[1].className = 'phead';
+  heads[0].id = 'phead0'; heads[1].id = 'phead1';
+  pk.appendChild(heads[0]); pk.appendChild(heads[1]);
+  for (const k of PKNOBS) for (let s = 0; s < 2; s++) {
+    const r = makeKnobRow((s ? 'R.' : 'L.') + k.key, s); pk.appendChild(r.el); knobRows.push(r);
+  }
+  for (let s = 0; s < 2; s++) {
+    const inp = $('name' + s);
+    inp.addEventListener('input', () => { setName(s, inp.value); refreshMenu(true); });
+    inp.addEventListener('change', () => { setName(s, inp.value); inp.value = settings.p[s].name; refreshMenu(); });
+  }
+  $('play').addEventListener('click', play);
+  $('resume').addEventListener('click', resume);
+  $('clearwins').addEventListener('click', () => { clearWins(); refreshMenu(); });
+  menuRows = [
+    { el: modes, change: d => { const i = MODES.findIndex(m => m[0] === settings.mode); settings.mode = MODES[clamp(i + d, 0, MODES.length - 1)][0]; saveSettings(); refreshMenu(); } },
+    { el: pr, change: d => { const cur = PRESET_ORDER.indexOf(presetName()); applyPreset(PRESET_ORDER[clamp((cur < 0 ? 2 : cur) + d, 0, 3)]); refreshMenu(); } }
+  ].concat(knobRows).concat([{ el: $('play'), change: () => {}, activate: play }]);
+}
+function winsHTML() {
+  const fmt = o => Object.keys(o).sort((a, b) => o[b] - o[a]).slice(0, 6).map(k => '<b>' + k.replace(/[<>&]/g, '') + '</b> ' + o[k]).join(' &middot; ') || '-';
+  return 'WINS THIS SESSION: ' + fmt(wins.session) + '<br>ALL-TIME: ' + fmt(wins.all) + '<br><span style="color:#777">* = won with the bumper wall on</span>';
+}
+function refreshMenu(keepInputs) {
+  if (!modeButtons.length) return;
+  modeButtons.forEach(b => b.classList.toggle('on', b.dataset.mode === settings.mode));
+  const pn = presetName();
+  presetButtons.forEach(b => b.classList.toggle('on', b.dataset.preset === pn));
+  customEl.textContent = pn === 'custom' ? 'CUSTOM' : '';
+  for (const r of knobRows) {
+    const def = knobDef(r.id), v = getKnob(r.id);
+    r.val.textContent = r.side === undefined ? def.fmt(v) : def.fmt(v, r.side);
+    const cpuSide = r.side !== undefined && isCpu(r.side) && (r.id.endsWith('control') || r.id.endsWith('speed'));
+    r.el.classList.toggle('dim', cpuSide || (r.id === 'cpu' && settings.mode === '2p'));
+    r.el.classList.toggle('on', r.id.endsWith('bumper') && v === true);
+    if (cpuSide && r.id.endsWith('control')) r.val.textContent = 'CPU';
+  }
+  for (let s = 0; s < 2; s++) {
+    $('phead' + s).textContent = (s ? 'RIGHT: ' : 'LEFT: ') + playerName(s);
+    const inp = $('name' + s);
+    inp.disabled = isCpu(s);
+    if (!keepInputs) inp.value = isCpu(s) ? 'CPU' : settings.p[s].name;
+    inp.placeholder = DEFAULT_NAMES[s];
+  }
+  $('wins').innerHTML = winsHTML();
+  $('resume').style.display = (game.mode === 'play' && game.paused) ? '' : 'none';
+  menuRows.forEach((r, i) => r.el.classList.toggle('sel', i === menuSel));
+}
+function openMenu() {
+  menuOpen = true;
+  if (game.mode === 'play') game.paused = true;
+  overlay.classList.remove('hidden');
+  refreshMenu();
+}
+function resume() {
+  menuOpen = false; overlay.classList.add('hidden');
+  game.paused = false;
+}
+function play() {
+  menuOpen = false; overlay.classList.add('hidden');
+  saveSettings();
+  startGame();
+}
+function togglePause() {
+  if (menuOpen || game.mode !== 'play') return;
+  game.paused = !game.paused;
+}
+function toggleMute() {
+  settings.muted = !settings.muted; saveSettings();
+  game.toast = settings.muted ? 'SOUND OFF' : 'SOUND ON'; game.toastT = 90;
+}
+
+/* ---------------- event wiring ---------------- */
+function typing() { const a = document.activeElement; return !!(a && a.tagName === 'INPUT'); }
+function onKeyDown(e) {
+  if (typing()) { if (e.key === 'Enter' || e.key === 'Escape') { document.activeElement.blur(); e.preventDefault && e.preventDefault(); } return; }
+  const code = e.code;
+  keys.add(code);
+  const gameKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(code) >= 0;
+  if (gameKey && e.preventDefault) e.preventDefault();
+  Sound.init();
+  if (menuOpen) {
+    if (code === 'ArrowUp' || code === 'ArrowDown') { menuSel = clamp(menuSel + (code === 'ArrowUp' ? -1 : 1), 0, menuRows.length - 1); refreshMenu(); }
+    else if (code === 'ArrowLeft' || code === 'ArrowRight') { const r = menuRows[menuSel]; if (r) r.change(code === 'ArrowLeft' ? -1 : 1); }
+    else if (e.repeat) return;
+    else if (code === 'Enter' || code === 'NumpadEnter' || code === 'Space') { if (e.preventDefault) e.preventDefault(); play(); }
+    else if (code === 'Escape') { if (game.mode === 'play' && game.paused) resume(); }
+    else if (/^Digit[1-4]$/.test(code)) { applyPreset(PRESET_ORDER[+code.slice(5) - 1]); refreshMenu(); }
+    else if (code === 'KeyM') toggleMute();
+    return;
+  }
+  if (e.repeat) return;                 // paddle movement reads key state, never key repeat
+  if (code === 'KeyP') togglePause();
+  else if (code === 'KeyM') toggleMute();
+  else if (code === 'Escape') openMenu();
+  else if (code === 'Space' || code === 'Enter') {
+    if (game.over || game.mode !== 'play') play();
+    else if (game.paused) game.paused = false;
+    else requestServe();
+  } else {
+    for (let s = 0; s < 2; s++) { const k = sideKeys(s); if (k.up.indexOf(code) >= 0 || k.down.indexOf(code) >= 0) requestServe(s); }
+  }
+}
+function onKeyUp(e) { keys.delete(e.code); }
+function toGame(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const w = r.width || canvas.width, h = r.height || canvas.height;
+  return { x: clamp((clientX - r.left) * SW / w, 0, SW), y: clamp((clientY - r.top) * SH / h, 0, SH) };
+}
+function mouseSide() { return settings.p[0].control === 'mouse' ? 0 : settings.p[1].control === 'mouse' ? 1 : -1; }
+function onMouseMove(e) { const p = toGame(e.clientX, e.clientY); mouse.x = p.x; mouse.y = p.y; }
+function onMouseDown(e) {
+  onMouseMove(e); Sound.init();
+  if (menuOpen) return;
+  const s = mouseSide();
+  if (game.over) return;
+  if (s >= 0) requestServe(s);
+}
+function onTouch(e) {
+  if (e.preventDefault) e.preventDefault();
+  Sound.init();
+  const list = e.changedTouches || [];
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i], p = toGame(t.clientX, t.clientY);
+    let side = touchSide[t.identifier];
+    if (side === undefined) { side = p.x < SW / 2 ? 0 : 1; touchSide[t.identifier] = side; if (game.over && !menuOpen) { play(); return; } requestServe(side); }
+    touchTarget[side] = p.y;
+  }
+}
+function onTouchEnd(e) {
+  const list = e.changedTouches || [];
+  for (let i = 0; i < list.length; i++) {
+    const id = list[i].identifier, side = touchSide[id];
+    if (side !== undefined) { touchTarget[side] = null; delete touchSide[id]; }
+  }
+}
+window.addEventListener('keydown', onKeyDown);
+window.addEventListener('keyup', onKeyUp);
+window.addEventListener('blur', () => keys.clear());
+window.addEventListener('resize', resize);
+canvas.addEventListener('mousemove', onMouseMove);
+canvas.addEventListener('mousedown', onMouseDown);
+canvas.addEventListener('touchstart', onTouch, { passive: false });
+canvas.addEventListener('touchmove', onTouch, { passive: false });
+canvas.addEventListener('touchend', onTouchEnd);
+canvas.addEventListener('touchcancel', onTouchEnd);
+overlay.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+
+/* ---------------- main loop: fixed 60.05 Hz steps ---------------- */
+const STEP = 1000 / FPS;
+let last = 0, acc = 0;
+function frame(t) {
+  requestAnimationFrame(frame);
+  if (!last) last = t;
+  acc += Math.min(250, Math.max(0, t - last)); last = t;
+  while (acc >= STEP) { update(); acc -= STEP; }
+  render();
+}
+
+/* ---------------- boot ---------------- */
+loadSettings();
+loadWins();
+game.dir = rnd() < 0.5 ? 1 : -1;
+game.vc = Math.floor(rnd() * 240);
+game.seg = Math.floor(rnd() * 8);
+game.x = Math.floor(rnd() * (SW - 40)) + 20;
+resize();
+drawLogo();
+buildMenu();
+refreshMenu();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

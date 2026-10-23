@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kids Arcade</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #000; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 24px 16px;
+    font-family: "Courier New", Courier, monospace; font-weight: bold; color: #fff;
+    background: radial-gradient(ellipse at top, #10102a 0%, #000 70%);
+  }
+  h1 { margin: 0 0 6px; font-size: 40px; letter-spacing: 10px; color: #ffcc00;
+       text-shadow: 0 0 18px rgba(255,204,0,.5); text-align: center; }
+  p.sub { margin: 0 0 28px; font-size: 12px; letter-spacing: 3px; color: #8ea0ff; text-align: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;
+          width: 100%; max-width: 900px; }
+  a.card {
+    display: flex; flex-direction: column; gap: 10px; padding: 18px 16px 16px;
+    background: #07071a; border: 2px solid #2121de; border-radius: 8px;
+    color: #fff; text-decoration: none; transition: transform .08s, border-color .08s;
+  }
+  a.card:hover, a.card:focus { transform: translateY(-3px); border-color: #ffcc00; outline: none; }
+  a.card .name { font-size: 18px; letter-spacing: 3px; }
+  a.card .year { font-size: 10px; letter-spacing: 2px; color: #8b8b8b; }
+  a.card .desc { font-size: 11px; line-height: 1.7; color: #d0d0d0; font-weight: normal; }
+  .foot { margin-top: 28px; font-size: 10px; letter-spacing: 1px; color: #8b8b8b; text-align: center; line-height: 1.9; }
+  .c-pac  .name { color: #ffff00; }
+  .c-si   .name { color: #00ff00; }
+  .c-frog .name { color: #00e000; }
+  .c-gal  .name { color: #ff4040; }
+  .c-dk   .name { color: #ff8040; }
+  .c-ast  .name { color: #ffffff; }
+  .c-duck .name { color: #3cbcfc; }
+  .c-cent .name { color: #ff40ff; }
+  .c-brk  .name { color: #ff6030; }
+  .c-tet  .name { color: #40c0ff; }
+  .c-drm  .name { color: #ffe040; }
+  .c-gnat .name { color: #ff8cc8; }
+  .c-pong .name { color: #ffffff; }
+  .c-pin  .name { color: #ffa040; }
+  .c-exb  .name { color: #ff3c3c; }
+</style>
+</head>
+<body>
+  <h1>KIDS ARCADE</h1>
+  <p class="sub">PICK A GAME &nbsp;&middot;&nbsp; EVERY GAME HAS A KID MODE AND A CAN&rsquo;T-LOSE SWITCH</p>
+  <div class="grid">
+    <a class="card c-pac" href="pac-man/index.html">
+      <span class="name">PAC-MAN</span><span class="year">NAMCO &middot; 1980</span>
+      <span class="desc">Eat every pellet. Choose how many ghosts chase you, from none to all four.</span>
+    </a>
+    <a class="card c-si" href="space-invaders/index.html">
+      <span class="name">SPACE INVADERS</span><span class="year">TAITO &middot; 1978</span>
+      <span class="desc">Shoot the alien rack before it lands. Hide behind the bunkers.</span>
+    </a>
+    <a class="card c-frog" href="frogger/index.html">
+      <span class="name">FROGGER</span><span class="year">KONAMI &middot; 1981</span>
+      <span class="desc">Hop across the road and the river to bring five frogs home.</span>
+    </a>
+    <a class="card c-gal" href="galaga/index.html">
+      <span class="name">GALAGA</span><span class="year">NAMCO &middot; 1981</span>
+      <span class="desc">Blast the bugs. Rescue your captured fighter for double fire.</span>
+    </a>
+    <a class="card c-dk" href="donkey-kong/index.html">
+      <span class="name">DONKEY KONG</span><span class="year">NINTENDO &middot; 1981</span>
+      <span class="desc">Climb the girders, jump the barrels, save Pauline.</span>
+    </a>
+    <a class="card c-ast" href="asteroids/index.html">
+      <span class="name">ASTEROIDS</span><span class="year">ATARI &middot; 1979</span>
+      <span class="desc">Spin, thrust and fire. Watch for the little saucer.</span>
+    </a>
+    <a class="card c-duck" href="duck-hunt/index.html">
+      <span class="name">DUCK HUNT</span><span class="year">NINTENDO &middot; 1984</span>
+      <span class="desc">Aim with the mouse and click to catch the ducks. Great mouse practice.</span>
+    </a>
+    <a class="card c-cent" href="centipede/index.html">
+      <span class="name">CENTIPEDE</span><span class="year">ATARI &middot; 1981</span>
+      <span class="desc">Blast the centipede as it winds down through the mushrooms. Aim with the mouse.</span>
+    </a>
+    <a class="card c-brk" href="breakout/index.html">
+      <span class="name">BREAKOUT</span><span class="year">ATARI &middot; 1976</span>
+      <span class="desc">Move the paddle with the mouse and knock out every brick.</span>
+    </a>
+    <a class="card c-tet" href="tetris/index.html">
+      <span class="name">TETRIS</span><span class="year">NINTENDO NES &middot; 1989</span>
+      <span class="desc">Turn and drop the falling pieces to fill whole rows.</span>
+    </a>
+    <a class="card c-drm" href="dr-mario/index.html">
+      <span class="name">DR. MARIO</span><span class="year">NINTENDO NES &middot; 1990</span>
+      <span class="desc">Line up matching colours to wipe out the viruses.</span>
+    </a>
+    <a class="card c-gnat" href="gnat-attack/index.html">
+      <span class="name">GNAT ATTACK</span><span class="year">MARIO PAINT &middot; SNES 1992</span>
+      <span class="desc">Swat the flies with the mouse before they get away.</span>
+    </a>
+    <a class="card c-pong" href="pong/index.html">
+      <span class="name">PONG</span><span class="year">ATARI &middot; 1972</span>
+      <span class="desc">Two players on one keyboard, or play the computer. W/S against the arrow keys.</span>
+    </a>
+    <a class="card c-pin" href="pinball/index.html">
+      <span class="name">PINBALL</span><span class="year">NINTENDO NES &middot; 1984</span>
+      <span class="desc">Flip the flippers, light the targets and find Mario&rsquo;s bonus stage.</span>
+    </a>
+    <a class="card c-exb" href="excitebike/index.html">
+      <span class="name">EXCITEBIKE</span><span class="year">NINTENDO NES &middot; 1984</span>
+      <span class="desc">Race over the ramps without overheating, then design your own track.</span>
+    </a>
+  </div>
+  <p class="foot">Each game opens straight from this folder in Chrome. No install, no server.<br />
+     In every game: ESC for the menu, P to pause, M for sound. Pick the ORIGINAL preset to play it exactly like the arcade.</p>
+</body>
+</html>

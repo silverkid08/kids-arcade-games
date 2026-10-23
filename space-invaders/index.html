@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>SPACE INVADERS</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", Courier, monospace; font-weight: bold;
+    color: #fff; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #stage { position: relative; }
+  canvas { display: block; background: #000; image-rendering: pixelated; }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    background: rgba(0,0,0,.86); text-align: center; padding: 10px; overflow-y: auto;
+  }
+  #overlay.hidden { display: none; }
+  #title { margin: 0; font-size: 26px; letter-spacing: 6px; color: #20ff20;
+           text-shadow: 0 0 14px rgba(32,255,32,.45); }
+  #sub { margin: 0; font-size: 12px; line-height: 1.8; color: #e8e8e8; letter-spacing: 1px; min-height: 1.8em; }
+  #presets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #presets .lbl, .knob .lbl { font-size: 10px; color: #ff6060; letter-spacing: 2px; }
+  #presets button {
+    min-width: 60px; height: 28px; font: inherit; font-size: 11px; letter-spacing: 1px; color: #fff; padding: 0 8px;
+    background: #0b180b; border: 2px solid #1a8a1a; border-radius: 5px; cursor: pointer;
+  }
+  #presets button:hover { border-color: #8eff8e; }
+  #presets button.sel { background: #1a8a1a; border-color: #ffffff; color: #fff; }
+  #presets.row-sel .lbl { color: #ffff60; }
+  #knobs { display: flex; flex-direction: column; gap: 3px; width: 100%; max-width: 420px; }
+  .knob { display: grid; grid-template-columns: 1fr 26px 118px 26px; align-items: center; gap: 4px;
+          padding: 1px 6px; border-radius: 4px; border: 1px solid transparent; }
+  .knob.sel { border-color: #ffff60; background: rgba(255,255,96,.08); }
+  .knob .lbl { text-align: left; }
+  .knob .val { font-size: 11px; color: #fff; letter-spacing: 1px; }
+  .knob button {
+    width: 26px; height: 22px; font: inherit; font-size: 13px; color: #fff; padding: 0;
+    background: #0b180b; border: 2px solid #1a8a1a; border-radius: 4px; cursor: pointer; line-height: 1;
+  }
+  .knob button:hover { border-color: #8eff8e; }
+  .knob.on .val { color: #ffff60; }
+  #highs { font-size: 10px; color: #bdbdbd; letter-spacing: 1px; line-height: 1.7; }
+  #highs b { color: #fff; }
+  #play {
+    font: inherit; font-size: 15px; letter-spacing: 3px; padding: 10px 22px;
+    color: #000; background: #20ff20; border: 2px solid #20ff20; border-radius: 5px; cursor: pointer;
+  }
+  #play:hover, #play.sel { background: #fff; border-color: #ffff60; }
+  .hint { margin: 0; font-size: 10px; color: #8b8b8b; line-height: 1.8; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen"></canvas>
+  <div id="overlay">
+    <h1 id="title">SPACE INVADERS</h1>
+    <p id="sub"></p>
+    <div id="presets"><span class="lbl">PRESET</span></div>
+    <div id="knobs"></div>
+    <div id="highs"></div>
+    <button id="play">PLAY</button>
+    <p class="hint">&larr; &rarr; or A/D move &nbsp;&middot;&nbsp; SPACE fire &nbsp;&middot;&nbsp; P pause &nbsp;&middot;&nbsp; M sound &nbsp;&middot;&nbsp; ESC menu<br>
+      menu: &uarr;&darr; pick a row, &larr;&rarr; change it, 1-4 presets, ENTER play</p>
+  </div>
+</div>
+<script>
+/* =====================================================================
+   SPACE INVADERS (Taito, 1978)  -  a faithful clone for kids.
+
+   The arcade machine is a 1-bit 256x224 framebuffer rotated into a
+   224-wide, 256-tall portrait screen, driven by two interrupts per frame.
+   This clone keeps that model: every object draws itself into a 1-bit
+   framebuffer (FB) with the real ROM bitmaps, using the same write /
+   OR-with-collision / erase primitives the 8080 code used, so shield
+   erosion, aliens eating the shields, the rack reversing when a drawn
+   pixel touches the edge columns, and shot collisions all fall out of the
+   framebuffer exactly as they did on the original board.  The colours are
+   the Midway cellophane overlay zones.
+
+   Numbers (coordinates, timers, tables) come from the annotated
+   disassembly at computerarcheology.com/Arcade/SpaceInvaders/ - see
+   README.md.  Kid-mode additions: difficulty presets/knobs and an
+   invulnerable mode.
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * Geometry.  Screen x runs 0..223 left to right.  Vertical positions are
+ * kept in the arcade's "Yr" convention: 0 at the BOTTOM of the screen,
+ * 255 at the top, because every ROM coordinate is written that way.
+ * canvas row = 255 - Yr.  The arcade's horizontal coordinate "Xr" is our
+ * x + 32 (screen RAM starts 32 rows into the address space).
+ * ------------------------------------------------------------------ */
+const SW = 224, SH = 256;
+const XR = 32;                        // Xr = x + XR
+
+/* ------------------------------------------------------------------ *
+ * The framebuffer: 224 columns x 32 bytes.  FB[x*32 + (yr>>3)] bit (yr&7).
+ * ------------------------------------------------------------------ */
+const FB = new Uint8Array(SW * 32);
+
+function hex(s) { return s.trim().split(/\s+/).map(h => parseInt(h, 16)); }
+
+/* ------------------------------------------------------------------ *
+ * Art: the actual ROM bitmaps (one byte per 8-pixel column, bit 0 at the
+ * bottom).  Addresses are the ROM locations they were copied from.
+ * ------------------------------------------------------------------ */
+const ALIEN_SPR = [
+  [hex('00 00 39 79 7A 6E EC FA FA EC 6E 7A 79 39 00 00'),     // 1C00 octopus (bottom two rows), frame 0
+   hex('00 00 38 7A 7F 6D EC FA FA EC 6D 7F 7A 38 00 00')],    // 1C30 frame 1
+  [hex('00 00 00 78 1D BE 6C 3C 3C 3C 6C BE 1D 78 00 00'),     // 1C10 crab (middle two rows)
+   hex('00 00 00 0E 18 BE 6D 3D 3C 3D 6D BE 18 0E 00 00')],    // 1C40
+  [hex('00 00 00 00 19 3A 6D FA FA 6D 3A 19 00 00 00 00'),     // 1C20 squid (top row)
+   hex('00 00 00 00 1A 3D 68 FC FC 68 3D 1A 00 00 00 00')]     // 1C50
+];
+const PLAYER_SPR   = hex('00 00 0F 1F 1F 1F 1F 7F FF 7F 1F 1F 1F 1F 0F 00');   // 1C60
+const PLAYER_BLOW  = [hex('00 04 01 13 03 07 B3 0F 2F 03 2F 49 04 03 00 01'),  // 1C70
+                      hex('40 08 05 A3 0A 03 5B 0F 27 27 0B 4B 40 84 11 48')]; // 1C80
+const SHOT_SPR     = hex('0F');                                                 // 1C90
+const SHOT_EXPL    = hex('99 3C 7E 3D BC 3E 7C 99');                            // 1C91
+const ALIEN_EXPL   = hex('00 08 49 22 14 81 42 00 42 81 14 22 49 08 00 00');    // 1CC0
+const SQUIGGLY     = [hex('44 AA 10'), hex('88 54 22'), hex('10 AA 44'), hex('22 54 88')];  // 1CD0
+const ASHOT_EXPL   = hex('4A 15 BE 3F 5E 25');                                  // 1CDC
+const PLUNGER      = [hex('04 FC 04'), hex('10 FC 10'), hex('20 FC 20'), hex('80 FC 80')];  // 1CE2
+const ROLLING      = [hex('00 FE 00'), hex('24 FE 12'), hex('00 FE 00'), hex('48 FE 90')];  // 1CEE
+const SHIELD_SPR   = hex('FF 0F FF 1F FF 3F FF 7F FF FF FC FF F8 FF F0 FF F0 FF F0 FF F0 FF ' +
+                         'F0 FF F0 FF F0 FF F8 FF FC FF FF FF FF FF FF 7F FF 3F FF 1F FF 0F'); // 1D20, 22 cols x 2
+const SAUCER_SPR   = hex('00 00 00 00 04 0C 1E 37 3E 7C 74 7E 7E 74 7C 3E 37 1E 0C 04 00 00 00 00'); // 1D64
+const SAUCER_EXPL  = hex('00 22 00 A5 40 08 98 3D B6 3C 36 1D 10 48 62 B6 1D 98 08 42 90 08 00 00'); // 1D7C
+
+/* The character set at 1E00: 8 bytes per glyph, A-Z, 0-9, < > space = *  ,
+   plus '?' (1FC0) and '-' (1FF8). */
+const FONT_HEX = [
+  '00 1F 24 44 24 1F 00 00', '00 7F 49 49 49 36 00 00', '00 3E 41 41 41 22 00 00', '00 7F 41 41 41 3E 00 00',
+  '00 7F 49 49 49 41 00 00', '00 7F 48 48 48 40 00 00', '00 3E 41 41 45 47 00 00', '00 7F 08 08 08 7F 00 00',
+  '00 00 41 7F 41 00 00 00', '00 02 01 01 01 7E 00 00', '00 7F 08 14 22 41 00 00', '00 7F 01 01 01 01 00 00',
+  '00 7F 20 18 20 7F 00 00', '00 7F 10 08 04 7F 00 00', '00 3E 41 41 41 3E 00 00', '00 7F 48 48 48 30 00 00',
+  '00 3E 41 45 42 3D 00 00', '00 7F 48 4C 4A 31 00 00', '00 32 49 49 49 26 00 00', '00 40 40 7F 40 40 00 00',
+  '00 7E 01 01 01 7E 00 00', '00 7C 02 01 02 7C 00 00', '00 7F 02 0C 02 7F 00 00', '00 63 14 08 14 63 00 00',
+  '00 60 10 0F 10 60 00 00', '00 43 45 49 51 61 00 00',
+  '00 3E 45 49 51 3E 00 00', '00 00 21 7F 01 00 00 00', '00 23 45 49 49 31 00 00', '00 42 41 49 59 66 00 00',
+  '00 0C 14 24 7F 04 00 00', '00 72 51 51 51 4E 00 00', '00 1E 29 49 49 46 00 00', '00 40 47 48 50 60 00 00',
+  '00 36 49 49 49 36 00 00', '00 31 49 49 4A 3C 00 00',
+  '00 08 14 22 41 00 00 00', '00 00 41 22 14 08 00 00', '00 00 00 00 00 00 00 00', '00 14 14 14 14 14 00 00',
+  '00 22 14 7F 14 22 00 00'
+];
+const FONT = {};
+'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<> =*'.split('').forEach((ch, i) => { FONT[ch] = hex(FONT_HEX[i]); });
+FONT['?'] = hex('00 20 40 4D 50 20 00 00');
+FONT['-'] = hex('00 08 08 08 08 08 00 00');
+
+/* ------------------------------------------------------------------ *
+ * Arcade tables
+ * ------------------------------------------------------------------ */
+/* 1DA3: starting Yr of the bottom-left ("reference") alien for waves 2..9,
+   then the table repeats.  Wave 1 is hard-coded to 0x78. */
+const RACK_START = [0x60, 0x50, 0x48, 0x48, 0x48, 0x40, 0x40, 0x40];
+function rackStartYr(wave) { return wave <= 1 ? 0x78 : RACK_START[(wave - 2) % 8]; }
+
+/* 1D54: mystery-ship score for the shot that hits it, indexed by the
+   number of player shots that have ended so far (mod 15 - the code wraps
+   one entry early, which is why 300 comes up every 15th shot). */
+const SAUCER_SCORES = [100, 50, 50, 100, 150, 100, 100, 50, 300, 100, 100, 100, 50, 150, 100];
+function saucerScoreForShot(n) { return SAUCER_SCORES[n % 15]; }
+
+/* 1D00: which column (1-11) the plunger (idx 0-15) and squiggly (idx 6-20) shots fall from. */
+const COL_FIRE = [1, 7, 1, 1, 1, 4, 11, 1, 6, 3, 1, 1, 11, 9, 2, 8, 2, 11, 4, 7, 10];
+
+/* 1AA1 / 1CB8: alien shot reload rate from the player's score. */
+function reloadRate(score) {
+  if (score < 300) return 0x30;
+  if (score < 1100) return 0x10;
+  if (score < 2100) return 0x0B;
+  if (score < 3100) return 0x08;
+  return 0x07;
+}
+
+/* 1A11 / 1A21: frames between fleet-movement notes by aliens remaining. */
+const FLEET_N = [50, 43, 36, 28, 22, 17, 13, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+const FLEET_D = [52, 46, 39, 34, 28, 24, 21, 19, 16, 14, 13, 12, 11, 9, 7, 5];
+function fleetDelay(n) { for (let i = 0; i < FLEET_N.length; i++) if (n >= FLEET_N[i]) return FLEET_D[i]; return 5; }
+
+const ALIEN_SCORE = [10, 10, 20, 20, 30];           // by row, 0 = bottom (1DA0)
+function alienType(row) { return row < 2 ? 0 : row < 4 ? 1 : 2; }
+
+/* Screen positions (converted from the screen addresses in the ROM). */
+const PLAYER_YR = 0x20, PLAYER_MIN_X = 0x30 - XR, PLAYER_MAX_X = 0xD9 - XR;
+const SHOT_START_YR = 0x28;
+const SAUCER_YR = 0xD0;
+const SHIELD_YR = 48, SHIELD_X = [32, 77, 122, 167];
+const RACK_X0 = 0x38 - XR;
+const SCORE_YR = 224, HUD_BOTTOM_YR = 8;
+
+/* ------------------------------------------------------------------ *
+ * Framebuffer primitives - the four routines the 8080 code used.
+ * ------------------------------------------------------------------ */
+function drawSimple(x, yr, data, n) {           // DrawSimpSprite: write one byte per column, yr multiple of 8
+  const b = yr >> 3;
+  for (let i = 0; i < n; i++) {
+    const xi = x + i;
+    if (xi < 0 || xi >= SW) continue;
+    FB[xi * 32 + b] = data[i];
+  }
+}
+const M_WRITE = 0, M_OR = 1, M_ERASE = 2;
+function drawShifted(x, yr, data, n, mode) {   // DrawSprite / DrawSprCollision / EraseShifted
+  const sh = yr & 7, b = yr >> 3;
+  let hit = 0;
+  for (let i = 0; i < n; i++) {
+    const xi = x + i;
+    if (xi < 0 || xi >= SW) continue;
+    const v = data[i] << sh, lo = v & 0xFF, hi = (v >> 8) & 0xFF;
+    const i0 = xi * 32 + b, i1 = i0 + 1, two = b + 1 < 32;
+    if (mode === M_WRITE) { FB[i0] = lo; if (two) FB[i1] = hi; }
+    else if (mode === M_OR) {
+      if (FB[i0] & lo) hit = 1; FB[i0] |= lo;
+      if (two) { if (FB[i1] & hi) hit = 1; FB[i1] |= hi; }
+    } else { FB[i0] &= ~lo; if (two) FB[i1] &= ~hi; }
+  }
+  return hit;
+}
+function eraseSimple(x, yr, n) {               // EraseSimpleSprite: clears TWO bytes per column
+  const b = yr >> 3;
+  for (let i = 0; i < n; i++) {
+    const xi = x + i;
+    if (xi < 0 || xi >= SW) continue;
+    FB[xi * 32 + b] = 0; if (b + 1 < 32) FB[xi * 32 + b + 1] = 0;
+  }
+}
+function clearSmall(x, yr, n) {                // ClearSmallSprite: one byte per column
+  const b = yr >> 3;
+  for (let i = 0; i < n; i++) { const xi = x + i; if (xi >= 0 && xi < SW) FB[xi * 32 + b] = 0; }
+}
+function columnHasPixels(x, b0, b1) {
+  for (let b = b0; b <= b1; b++) if (FB[x * 32 + b]) return true;
+  return false;
+}
+function printText(x, yr, str) {               // PrintMessage / DrawChar
+  for (let i = 0; i < str.length; i++) drawSimple(x + 8 * i, yr, FONT[str[i]] || FONT[' '], 8);
+}
+function clearPlayField() {                    // ClearPlayField: Yr 16..223 on every column
+  for (let x = 0; x < SW; x++) for (let b = 2; b < 28; b++) FB[x * 32 + b] = 0;
+}
+function clearScreen() { FB.fill(0); }
+function drawBottomLine() {                    // DrawBottomLine: Yr 16 across the screen
+  for (let x = 0; x < SW; x++) FB[x * 32 + 2] |= 1;
+}
+function countPixels(x0, x1, yr0, yr1) {
+  let n = 0;
+  for (let x = x0; x <= x1; x++) for (let yr = yr0; yr <= yr1; yr++) if (FB[x * 32 + (yr >> 3)] & (1 << (yr & 7))) n++;
+  return n;
+}
+
+/* ------------------------------------------------------------------ *
+ * Settings: presets and knobs
+ * ------------------------------------------------------------------ */
+const KNOBS = [
+  { key: 'stepRate',     label: 'ALIEN STEP RATE', values: [25, 35, 45, 55, 70, 85, 100, 125, 150, 200], fmt: v => v + '%' },
+  { key: 'bombRate',     label: 'BOMB FREQUENCY',  values: [0, 10, 25, 50, 75, 100, 150, 200], fmt: v => v === 0 ? 'NONE' : v + '%' },
+  { key: 'playerSpeed',  label: 'CANNON SPEED',    values: [50, 75, 100, 125, 150, 200, 300], fmt: v => v + '%' },
+  { key: 'lives',        label: 'LIVES',           values: [1, 2, 3, 4, 5, 6, 7, 8, 9], fmt: v => String(v) },
+  { key: 'startWave',    label: 'STARTING WAVE',   values: [1, 2, 3, 4, 5, 6, 7, 8, 9], fmt: v => String(v) },
+  { key: 'extraLife',    label: 'EXTRA LIFE',      values: [0, 1000, 1500, 2000, 3000, -1000, -2000],
+    fmt: v => v === 0 ? 'NONE' : v < 0 ? 'EVERY ' + (-v) : 'AT ' + v },
+  { key: 'shields',      label: 'SHIELDS',         values: [0, 2, 4], fmt: v => String(v) },
+  { key: 'shieldRepair', label: 'SHIELD REPAIR',   values: [0, 1], fmt: v => v ? 'EACH LIFE' : 'OFF' },
+  { key: 'invulnerable', label: 'INVULNERABLE',    values: [0, 1], fmt: v => v ? 'ON' : 'OFF', toggle: true }
+];
+const PRESETS = {
+  kid:      { stepRate: 45,  bombRate: 25,  playerSpeed: 150, lives: 9, startWave: 1, extraLife: -1000, shields: 4, shieldRepair: 1 },
+  easy:     { stepRate: 70,  bombRate: 50,  playerSpeed: 125, lives: 5, startWave: 1, extraLife: 1000,  shields: 4, shieldRepair: 1 },
+  normal:   { stepRate: 85,  bombRate: 75,  playerSpeed: 100, lives: 3, startWave: 1, extraLife: 1500,  shields: 4, shieldRepair: 0 },
+  original: { stepRate: 100, bombRate: 100, playerSpeed: 100, lives: 3, startWave: 1, extraLife: 1500,  shields: 4, shieldRepair: 0 }
+};
+const PRESET_ORDER = ['kid', 'easy', 'normal', 'original'];
+const LS = 'spaceinvaders.';
+
+const settings = Object.assign({ invulnerable: 0 }, PRESETS.normal);
+
+function presetName() {
+  for (const p of PRESET_ORDER) {
+    const d = PRESETS[p];
+    if (Object.keys(d).every(k => settings[k] === d[k])) return p;
+  }
+  return 'custom';
+}
+function applyPreset(name) {
+  if (!PRESETS[name]) return;
+  Object.assign(settings, PRESETS[name]);    // never touches invulnerable, never mutates PRESETS
+  saveSettings();
+}
+function setKnob(key, value) {
+  const k = KNOBS.find(k => k.key === key);
+  if (!k) return;
+  settings[key] = k.values.includes(value) ? value : k.values[0];
+  saveSettings();
+}
+function stepKnob(key, dir) {
+  const k = KNOBS.find(k => k.key === key);
+  let i = k.values.indexOf(settings[key]);
+  if (i < 0) i = 0;
+  i = (i + dir + k.values.length) % k.values.length;
+  setKnob(key, k.values[i]);
+}
+function saveSettings() {
+  try { localStorage.setItem(LS + 'settings', JSON.stringify(settings)); } catch (e) {}
+}
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS + 'settings') || 'null');
+    if (!s) return;
+    for (const k of KNOBS) if (k.values.includes(s[k.key])) settings[k.key] = s[k.key];
+  } catch (e) {}
+}
+function highKey() { return LS + 'high.' + presetName() + (settings.invulnerable ? '.inv' : ''); }
+function loadHigh(key) { try { return parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch (e) { return 0; } }
+function saveHigh() {
+  const key = highKey();
+  if (game.score > loadHigh(key)) {
+    try { localStorage.setItem(key, String(game.score)); } catch (e) {}
+  }
+  game.high = Math.max(game.high, game.score);
+}
+
+/* ------------------------------------------------------------------ *
+ * Sound (WebAudio, synthesised; the original used discrete analogue
+ * circuits so these are approximations of the famous noises)
+ * ------------------------------------------------------------------ */
+const Sound = (() => {
+  let ctx = null, master = null, enabled = true, ufoNodes = null, noiseBuf = null;
+  function unlock() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      ctx = new AC();
+      master = ctx.createGain(); master.gain.value = enabled ? 0.5 : 0; master.connect(ctx.destination);
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) { ctx = null; }
+  }
+  function tone(o) {
+    if (!ctx) return;
+    const t = ctx.currentTime + (o.delay || 0);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = o.type || 'square';
+    osc.frequency.setValueAtTime(o.f0, t);
+    if (o.f1) osc.frequency.linearRampToValueAtTime(o.f1, t + o.dur);
+    g.gain.setValueAtTime(o.vol || 0.3, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + o.dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t); osc.stop(t + o.dur + 0.02);
+  }
+  function noise(dur, vol, f0, f1, delay) {
+    if (!ctx) return;
+    const t = ctx.currentTime + (delay || 0);
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const flt = ctx.createBiquadFilter(); flt.type = 'lowpass';
+    flt.frequency.setValueAtTime(f0, t); flt.frequency.exponentialRampToValueAtTime(Math.max(f1, 30), t + dur);
+    const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(flt); flt.connect(g); g.connect(master);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+  const FLEET_HZ = [67, 60, 53, 47];   // the four "walking bass" notes, high to low
+  return {
+    unlock,
+    get enabled() { return enabled; },
+    toggle() { enabled = !enabled; if (master) master.gain.value = enabled ? 0.5 : 0; return enabled; },
+    fleet(i) { tone({ f0: FLEET_HZ[i & 3], dur: 0.09, type: 'square', vol: 0.5 }); tone({ f0: FLEET_HZ[i & 3] * 2, dur: 0.06, type: 'triangle', vol: 0.25 }); },
+    shoot() { tone({ f0: 900, f1: 120, dur: 0.28, type: 'sawtooth', vol: 0.2 }); noise(0.25, 0.15, 3000, 400); },
+    alienHit() { noise(0.16, 0.5, 1800, 200); },
+    playerHit() { noise(0.9, 0.6, 1200, 80); tone({ f0: 200, f1: 30, dur: 0.9, type: 'sawtooth', vol: 0.3 }); },
+    saucerHit() { noise(0.5, 0.4, 2500, 150); for (let i = 0; i < 6; i++) tone({ f0: 1200 - i * 150, dur: 0.08, type: 'square', vol: 0.2, delay: i * 0.08 }); },
+    extraLife() { for (let i = 0; i < 8; i++) tone({ f0: 440 + (i & 1) * 220, dur: 0.09, type: 'square', vol: 0.3, delay: i * 0.1 }); },
+    ufoStart() {
+      if (!ctx || ufoNodes) return;
+      const osc = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain();
+      osc.type = 'square'; osc.frequency.value = 420;
+      lfo.type = 'triangle'; lfo.frequency.value = 6; lg.gain.value = 180;
+      lfo.connect(lg); lg.connect(osc.frequency);
+      g.gain.value = 0.12; osc.connect(g); g.connect(master);
+      osc.start(); lfo.start();
+      ufoNodes = { osc, lfo };
+    },
+    ufoStop() { if (ufoNodes) { try { ufoNodes.osc.stop(); ufoNodes.lfo.stop(); } catch (e) {} ufoNodes = null; } }
+  };
+})();
+
+/* ------------------------------------------------------------------ *
+ * Game state
+ * ------------------------------------------------------------------ */
+const game = {
+  state: 'menu',          // menu | prompt | play | roundend | gameover
+  paused: false,
+  frame: 0,
+  timer: 0,
+  score: 0,
+  high: 0,
+  wave: 1,
+  rackCnt: 0,             // racks beaten (mod 8 table index like the arcade)
+  ships: 0,               // reserve ships (what the bottom-left digit shows)
+  extraAwarded: false,
+  nextExtra: 0,
+  // rack
+  alive: new Uint8Array(55),
+  numAliens: 55,
+  refX: RACK_X0, refYr: 0x78,
+  dx: 2, dy: 0,
+  rackDir: 0,             // 0 right, 1 left
+  curIndex: 0,
+  animFrame: 0,
+  alienAcc: 0,
+  alienExploding: 0, expTimer: 0, expX: 0, expYr: 0,
+  alienPos: new Array(55).fill(null),
+  invaded: 0,
+  playerOK: 1,
+  // player object (ROM mirror 1B10)
+  P: null,
+  playerAcc: 0,
+  fireBounce: 0,
+  // player shot (1B20)
+  shot: null,
+  shotCount: 0,
+  sauScoreIdx: 0,
+  // alien fire
+  enableAlienFire: 0, alienFireDelay: 0x30, aShotDelta: -4, skipPlunger: 0, fireGap: 0,
+  roll: null, plunger: null, squig: null,
+  // saucer (1B83)
+  saucer: null, tillSaucer: 0x600,
+  // sound
+  fleetCnt: 0x40, fleetNote: 0,
+  // kid mode
+  flash: 0,
+  overTimer: 0, overChars: 0
+};
+
+function newPlayer() { return { timer: 128, alive: 0xFF, expTimer: 5, expCount: 12, x: PLAYER_MIN_X, spr: PLAYER_SPR }; }
+function newShot() { return { status: 0, blowUp: 16, img: SHOT_SPR, size: 1, yr: SHOT_START_YR, x: 0 }; }
+function newAlienShot(kind) {
+  // kind 0 rolling (tracks player), 1 plunger, 2 squiggly
+  return { kind, status: 0, stepCnt: 0, track: kind === 0 ? 0 : 1, cfir: kind === 1 ? 0 : 6, blowCnt: 4,
+    imgIdx: 0, img: null, size: 3, yr: 0, x: 0, skip: kind === 0 ? 1 : 0,
+    frames: kind === 0 ? ROLLING : kind === 1 ? PLUNGER : SQUIGGLY };
+}
+function newSaucer() { return { start: 0, active: 0, hit: 0, hitTime: 0x20, img: SAUCER_SPR, x: 0x29 - XR, dx: 2, scoreStr: null }; }
+
+/* CopyRAMMirror: everything that the arcade re-initialises from ROM at
+   the start of a game and at the start of every wave. */
+function resetMirror() {
+  game.P = newPlayer();
+  game.shot = newShot();
+  game.roll = newAlienShot(0); game.plunger = newAlienShot(1); game.squig = newAlienShot(2);
+  game.saucer = newSaucer();
+  game.tillSaucer = 0x600;
+  game.shotCount = 0; game.sauScoreIdx = 0;
+  game.enableAlienFire = 0; game.alienFireDelay = 0x30; game.aShotDelta = -4; game.skipPlunger = 0; game.fireGap = 0;
+  game.playerOK = 1; game.fireBounce = 0; game.playerAcc = 0; game.alienAcc = 0;
+  game.alienExploding = 0; game.expTimer = 0;
+  game.curIndex = 0; game.animFrame = 0; game.dy = 0;
+  game.fleetCnt = 0x40; game.fleetNote = 0;
+  game.invaded = 0;
+  Sound.ufoStop();
+}
+
+function initAliens() { game.alive.fill(1); game.numAliens = 55; game.alienPos.fill(null); }
+function initRack(yr) {
+  game.refX = RACK_X0; game.refYr = yr;
+  game.dx = 2; game.dy = 0; game.rackDir = 0; game.curIndex = 0; game.animFrame = 0;
+}
+function drawShields() {
+  const slots = settings.shields === 4 ? [0, 1, 2, 3] : settings.shields === 2 ? [1, 2] : [];
+  for (const s of slots) {
+    const x = SHIELD_X[s];
+    for (let c = 0; c < 22; c++) {
+      FB[(x + c) * 32 + 6] |= SHIELD_SPR[c * 2];
+      FB[(x + c) * 32 + 7] |= SHIELD_SPR[c * 2 + 1];
+    }
+  }
+}
+function shieldPixels() { return countPixels(SHIELD_X[0], SHIELD_X[3] + 21, SHIELD_YR, SHIELD_YR + 15); }
+
+/* ------------------------------------------------------------------ *
+ * HUD (text positions are the ROM's screen addresses)
+ * ------------------------------------------------------------------ */
+function scoreText(n) { return n < 10000 ? ('000' + n).slice(-4) : String(n); }
+function drawScores() {
+  clearSmall(24, SCORE_YR, 48); printText(24, SCORE_YR, scoreText(game.score));         // 271C
+  clearSmall(88, SCORE_YR, 48); printText(88, SCORE_YR, scoreText(game.high));          // 2F1C
+  printText(168, SCORE_YR, '0000');                                                     // 391C
+}
+function drawHUD() {
+  printText(0, 240, ' SCORE<1> HI-SCORE SCORE<2> ');                                     // 241E
+  drawScores();
+  printText(136, HUD_BOTTOM_YR, 'CREDIT 00');                                            // 3501 / 3C01
+  drawShips();
+}
+function drawShips() {                       // DrawNumShips + the digit at 2501
+  clearSmall(8, HUD_BOTTOM_YR, 8);
+  printText(8, HUD_BOTTOM_YR, String(Math.min(9, game.ships)));
+  clearSmall(24, HUD_BOTTOM_YR, 112);
+  for (let i = 0; i < Math.min(game.ships, 6); i++) drawSimple(24 + i * 16, HUD_BOTTOM_YR, PLAYER_SPR, 16);
+}
+function addScore(n) {
+  game.score += n;
+  drawScores();
+  // extra ship (0935)
+  const ex = settings.extraLife;
+  if (ex > 0 && !game.extraAwarded && game.score >= ex) { game.extraAwarded = true; awardShip(); }
+  else if (ex < 0) { while (game.score >= game.nextExtra) { game.nextExtra += -ex; awardShip(); } }
+}
+function awardShip() {
+  game.ships++;
+  drawShips();
+  Sound.extraLife();
+}
+
+/* ------------------------------------------------------------------ *
+ * Set-up / state changes
+ * ------------------------------------------------------------------ */
+function newGame() {
+  game.score = 0;
+  game.high = loadHigh(highKey());
+  game.wave = settings.startWave;
+  game.rackCnt = (game.wave - 1) & 7;
+  game.ships = settings.lives;
+  game.extraAwarded = false;
+  game.nextExtra = settings.extraLife < 0 ? -settings.extraLife : 0;
+  game.frame = 0;
+  resetMirror();
+  initAliens();
+  initRack(rackStartYr(game.wave));
+  clearScreen();
+  drawHUD();
+  game.ships--;                 // RemoveShip: the first ship is the one in play
+  drawShips();
+  // PromptPlayer: "PLAY PLAYER<1>" for 176 frames while the score flashes
+  printText(56, 136, 'PLAY PLAYER<1>');
+  game.timer = 176;
+  game.state = 'prompt';
+}
+
+function beginWave() {         // 0804..0817
+  clearPlayField();
+  drawBottomLine();
+  drawShields();
+  game.state = 'play';
+}
+
+function nextWave() {          // 09EF end-of-turn
+  clearPlayField();
+  resetMirror();
+  game.rackCnt = (game.rackCnt & 7) + 1;
+  game.wave++;
+  initAliens();
+  initRack(RACK_START[game.rackCnt - 1]);
+  beginWave();
+}
+
+function gameOver() {
+  game.state = 'gameover';
+  game.overTimer = 0; game.overChars = 0;
+  Sound.ufoStop();
+  clearSmall(24, HUD_BOTTOM_YR, 112);
+  printText(8, HUD_BOTTOM_YR, '0');
+  saveHigh();
+  drawScores();
+}
+
+function demoScene() {         // menu backdrop: a fresh wave-1 screen
+  clearScreen();
+  game.score = 0; game.ships = settings.lives - 1;
+  game.high = loadHigh(highKey());
+  drawHUD();
+  resetMirror();
+  initAliens();
+  initRack(0x78);
+  drawBottomLine();
+  drawShields();
+  game.P.timer = 0;
+  drawSimple(game.P.x, PLAYER_YR, PLAYER_SPR, 16);
+}
+
+/* ------------------------------------------------------------------ *
+ * The rack.  One alien is advanced and drawn per tick, exactly like the
+ * arcade's CursorNextAlien + DrawAlien pair (one per frame at 100%).
+ * ------------------------------------------------------------------ */
+function moveRefAlien() {       // MoveRefAlien + AddDelta
+  game.refYr = (game.refYr + game.dy) & 0xFF;
+  game.dy = 0;
+  game.refX += game.dx;
+  game.animFrame ^= 1;
+}
+function alienTick() {
+  if (game.alienExploding) {    // AExplodeTime: the rack waits while an alien explodes
+    if (--game.expTimer <= 0) {
+      eraseSimple(game.expX, game.expYr, 16);
+      game.alienExploding = 0;
+      if (game.shot.status === 5) game.shot.status = 4;
+    }
+    return;
+  }
+  if (!game.playerOK) return;   // CursorNextAlien: frozen while the player blows up
+  // DrawAlien (end-of-screen interrupt): draw the alien under the cursor
+  let idx = game.curIndex;
+  if (game.alive[idx]) {
+    const row = Math.floor(idx / 11), col = idx % 11;
+    const x = game.refX + 16 * col, yr = (game.refYr + 16 * row) & 0xFF;
+    drawShifted(x, yr, ALIEN_SPR[alienType(row)][game.animFrame], 16, M_WRITE);
+    game.alienPos[idx] = { x, yr };
+  }
+  // CursorNextAlien (mid-screen interrupt): advance to the next live alien;
+  // passing the end of the rack moves the reference alien
+  let guard = 0;
+  do {
+    idx++;
+    if (idx >= 55) { moveRefAlien(); idx = 0; }
+    if (++guard > 112) return;  // no aliens left
+  } while (!game.alive[idx]);
+  game.curIndex = idx;
+  const nextYr = (game.refYr + 16 * Math.floor(idx / 11)) & 0xFF;
+  if (nextYr < 0x28) invade();  // 016B: the next alien would sit on the cannon's row
+}
+function invade() {             // 1971: the rack reached the player's row
+  if (settings.invulnerable && game.state === 'play') {
+    // kid mode: the aliens "retreat" to the wave's starting height instead of ending the game
+    game.flash = 12;
+    clearPlayField();
+    drawBottomLine();
+    drawShields();
+    game.alienPos.fill(null);
+    initRack(rackStartYr(game.wave));
+    game.dy = 0;
+    return;
+  }
+  game.invaded = 1;
+  if (game.P.alive === 0xFF) { game.P.alive = 0; Sound.playerHit(); }
+}
+function rackBump() {           // RackBump: a drawn pixel in column 9 / 213 (Yr 32..215) flips the rack
+  if (game.rackDir === 0) {
+    if (columnHasPixels(213, 4, 26)) { game.dx = -2; game.rackDir = 1; game.dy = -8; }
+  } else {
+    if (columnHasPixels(9, 4, 26)) { game.dx = game.numAliens === 1 ? 3 : 2; game.rackDir = 0; game.dy = -8; }
+  }
+}
+function countAliens() {
+  let n = 0;
+  for (let i = 0; i < 55; i++) n += game.alive[i];
+  game.numAliens = n;
+}
+
+/* Cnt16s / FindRow / FindColumn - the arcade's way of turning a screen
+   coordinate into a rack row/column (including its 8-bit wrap quirk). */
+function cnt16s(ref, target) {
+  let a = ref & 0xFF, c = 0;
+  target &= 0xFF;
+  if (a >= target) { do { c++; a = (a + 16) & 0xFF; } while (a & 0x80); }
+  while (a < target) { a = (a + 16) & 0xFF; c++; }
+  return { c, a };
+}
+function findRow(yr) { const r = cnt16s(game.refYr, yr); return { row: r.c - 1, coord: (r.a - 16) & 0xFF }; }
+function findColumn(xr) { const r = cnt16s(game.refX + XR, xr); return { col: r.c, coord: (r.a - 16) & 0xFF }; }
+
+/* ------------------------------------------------------------------ *
+ * Player (GameObj0)
+ * ------------------------------------------------------------------ */
+const input = { left: false, right: false, fire: false };
+
+function playerTick() {
+  const P = game.P;
+  if (P.timer > 0) { P.timer--; return; }          // ~2 s before the cannon appears
+  if (P.alive !== 0xFF) {                           // blowing up
+    if (--P.expTimer > 0) return;
+    game.playerOK = 0; game.enableAlienFire = 0; game.alienFireDelay = 0x30;
+    P.expTimer = 5;
+    if (--P.expCount > 0) {
+      P.alive = (P.alive + 1) & 1;
+      drawSimple(P.x, PLAYER_YR, PLAYER_BLOW[P.alive], 16);
+      return;
+    }
+    eraseSimple(P.x, PLAYER_YR, 16);
+    game.P = newPlayer();
+    if (game.invaded) { gameOver(); return; }
+    if (game.ships === 0) { gameOver(); return; }
+    game.ships--;                                   // RemoveShip
+    drawShips();
+    if (settings.shieldRepair) {
+      // kid mode: rebuild the bunkers (clear their rows first so the fresh pattern is whole)
+      for (let x = 0; x < SW; x++) { FB[x * 32 + 6] = 0; FB[x * 32 + 7] = 0; }
+      drawShields();
+    }
+    return;
+  }
+  game.playerOK = 1;
+  if (!game.enableAlienFire && --game.alienFireDelay <= 0) { game.enableAlienFire = 1; game.alienFireDelay = 0; }
+  game.playerAcc += settings.playerSpeed / 100;
+  while (game.playerAcc >= 1) {
+    game.playerAcc -= 1;
+    if (input.right && !input.left && P.x < PLAYER_MAX_X) P.x++;
+    else if (input.left && !input.right && P.x > PLAYER_MIN_X) P.x--;
+  }
+  drawSimple(P.x, PLAYER_YR, PLAYER_SPR, 16);
+}
+
+/* PlrFireOrDemo */
+function playerFire() {
+  const P = game.P;
+  if (P.alive !== 0xFF || P.timer > 0) return;
+  if (game.fireBounce) { if (!input.fire) game.fireBounce = 0; return; }
+  if (game.shot.status !== 0 || !input.fire) return;
+  game.shot.status = 1;
+  game.fireBounce = 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * Player shot (GameObj1 + PlayerShotHit)
+ * ------------------------------------------------------------------ */
+function playerShotTick() {
+  const S = game.shot;
+  if (S.status === 0) return;
+  if (S.status === 1) {                            // InitPlyShot
+    S.status = 2;
+    S.x = game.P.x + 8;
+    drawShifted(S.x, S.yr, S.img, S.size, M_OR);
+    Sound.shoot();
+    return;
+  }
+  if (S.status === 2) {                            // MovePlyShot
+    drawShifted(S.x, S.yr, S.img, S.size, M_ERASE);
+    S.yr += 4;
+    const hit = drawShifted(S.x, S.yr, S.img, S.size, M_OR);
+    playerShotHit(hit);
+    return;
+  }
+  if (S.status === 3) {                            // blowing up away from the rack (top of screen, shield, bomb)
+    if (--S.blowUp === 0) { endOfBlowup(); return; }
+    if (S.blowUp !== 15) return;
+    drawShifted(S.x, S.yr, S.img, S.size, M_ERASE);
+    S.img = SHOT_EXPL; S.size = 8; S.yr -= 2; S.x -= 3;
+    drawShifted(S.x, S.yr, S.img, S.size, M_OR);
+    return;
+  }
+  if (S.status === 5) return;                      // waiting on the alien explosion
+  endOfBlowup();                                   // status 4 or anything else
+}
+function endOfBlowup() {
+  const S = game.shot;
+  drawShifted(S.x, S.yr, S.img, S.size, M_ERASE);
+  game.shot = newShot();
+  game.sauScoreIdx = (game.sauScoreIdx + 1) % 15;  // (wraps one early - the famous bug)
+  game.shotCount = (game.shotCount + 1) & 0xFF;
+  if (game.saucer.active) return;
+  if (game.shotCount & 1) { game.saucer.x = 0x29 - XR; game.saucer.dx = 2; }
+  else { game.saucer.x = 0xE0 - XR; game.saucer.dx = -2; }
+}
+function playerShotHit(collided) {
+  const S = game.shot;
+  if (S.status !== 2) return;
+  if (S.yr >= 0xD8) { S.status = 3; return; }     // left the playfield
+  if (!collided) return;
+  if (S.yr >= 0xCE) {                              // saucer zone
+    game.saucer.hit = 1;
+    S.status = 4;
+    return;
+  }
+  const b = (S.yr + 6) & 0xFF;
+  if (game.refYr < 0x90 && game.refYr >= b) { S.status = 3; return; }   // below the rack: shield or bomb
+  const r = findRow(b), c = findColumn(S.x + XR);
+  const row = r.row, col = c.col - 1;
+  if (row < 0 || row > 4 || col < 0 || col > 10 || !game.alive[row * 11 + col]) { S.status = 3; return; }
+  // kill the alien
+  const idx = row * 11 + col;
+  game.alive[idx] = 0;
+  game.alienPos[idx] = null;
+  game.expX = c.coord - XR; game.expYr = r.coord;
+  S.status = 5;
+  addScore(ALIEN_SCORE[row]);
+  Sound.alienHit();
+  drawShifted(game.expX, game.expYr, ALIEN_EXPL, 16, M_WRITE);
+  game.alienExploding = 1;
+  game.expTimer = 16;
+}
+
+/* ------------------------------------------------------------------ *
+ * Alien bombs (GameObj2/3/4 + HandleAlienShot).  Each of the three runs
+ * once every 3 frames, staggered, which is the rate the arcade's
+ * shot-sync scheme produced: 4 pixels every 3 frames.
+ * ------------------------------------------------------------------ */
+function effectiveReload() {
+  const r = reloadRate(game.score);
+  if (settings.bombRate === 100) return r;
+  return Math.max(1, Math.round(r * 100 / settings.bombRate));
+}
+function findInColumn(col) {   // col 1-based; returns row of the lowest live alien or -1
+  for (let row = 0; row < 5; row++) if (game.alive[row * 11 + col - 1]) return row;
+  return -1;
+}
+function handleAlienShot(sh, o1, o2) {
+  if (!(sh.status & 0x80)) {
+    if (!game.enableAlienFire || settings.bombRate === 0 || game.fireGap > 0) return;
+    sh.stepCnt = 0;
+    const rate = effectiveReload();
+    if (o1.stepCnt !== 0 && rate >= o1.stepCnt) return;   // too soon after the other shots
+    if (o2.stepCnt !== 0 && rate >= o2.stepCnt) return;
+    let col;
+    if (sh.track === 0) {                                  // rolling shot: the column over the player
+      col = findColumn(game.P.x + 8 + XR).col;
+      if (col >= 12) col = 11;
+    } else {
+      col = COL_FIRE[sh.cfir++];
+    }
+    const row = findInColumn(col);
+    if (row < 0) return;
+    sh.x = game.refX + 16 * (col - 1) + 7;
+    sh.yr = (game.refYr + 16 * row - 10) & 0xFF;
+    sh.imgIdx = 0; sh.img = sh.frames[0]; sh.size = 3;
+    sh.status |= 0x80;
+    sh.stepCnt = 1;
+    return;
+  }
+  if (sh.status & 1) { shotBlowingUp(sh); return; }
+  sh.stepCnt++;
+  drawShifted(sh.x, sh.yr, sh.img, sh.size, M_ERASE);
+  sh.imgIdx = (sh.imgIdx + 1) & 3; sh.img = sh.frames[sh.imgIdx];
+  sh.yr = (sh.yr + game.aShotDelta) & 0xFF;
+  const hit = drawShifted(sh.x, sh.yr, sh.img, sh.size, M_OR);
+  if (sh.yr < 0x15) { sh.status |= 1; return; }          // reached the ground
+  if (!hit) return;
+  if (sh.yr >= 0x1E && sh.yr < 0x27) playerStruck();     // in the cannon's band
+  sh.status |= 1;
+}
+function playerStruck() {
+  if (game.P.alive !== 0xFF) return;
+  if (settings.invulnerable) { game.flash = 8; return; }
+  game.P.alive = 0;
+  Sound.playerHit();
+}
+function shotBlowingUp(sh) {
+  sh.blowCnt--;
+  if (sh.blowCnt === 3) {
+    drawShifted(sh.x, sh.yr, sh.img, sh.size, M_ERASE);
+    sh.img = ASHOT_EXPL; sh.size = 6; sh.yr = (sh.yr - 2) & 0xFF; sh.x -= 2;
+    drawShifted(sh.x, sh.yr, sh.img, sh.size, M_OR);
+  } else if (sh.blowCnt <= 0) {
+    drawShifted(sh.x, sh.yr, sh.img, sh.size, M_ERASE);
+    resetAlienShot(sh);
+  }
+}
+function resetAlienShot(sh) {
+  const cfir = sh.cfir, kind = sh.kind;
+  Object.assign(sh, newAlienShot(kind));
+  sh.cfir = cfir;
+  if (kind === 1 && game.numAliens === 1) game.skipPlunger = 1;
+  if (settings.bombRate < 100) game.fireGap = Math.round((100 - settings.bombRate) * 1.2);
+}
+function rollingTick()  { if (game.roll.skip && !(game.roll.status & 0x80)) { game.roll.skip = 0; return; }
+                          handleAlienShot(game.roll, game.plunger, game.squig); }
+function plungerTick()  {
+  if (game.skipPlunger) return;
+  handleAlienShot(game.plunger, game.roll, game.squig);
+  if (game.plunger.cfir >= 0x10) game.plunger.cfir = 0;
+}
+function squigglyTick() {
+  handleAlienShot(game.squig, game.plunger, game.roll);
+  if (game.squig.cfir >= 0x15) game.squig.cfir = 6;
+}
+
+/* ------------------------------------------------------------------ *
+ * The mystery ship (shares GameObj4 with the squiggly shot)
+ * ------------------------------------------------------------------ */
+function saucerOrSquigglyTick() {
+  const U = game.saucer;
+  if (!U.start || (game.squig.stepCnt !== 0 && !U.active)) { squigglyTick(); return; }
+  if (!U.active) {
+    if (game.numAliens < 8) { squigglyTick(); return; }
+    U.active = 1;
+    drawSimple(U.x, SAUCER_YR, U.img, 24);
+    Sound.ufoStart();
+  }
+  if (U.hit) {
+    Sound.ufoStop();
+    U.hitTime--;
+    if (U.hitTime === 0x1F) { U.img = SAUCER_EXPL; drawSimple(U.x, SAUCER_YR, U.img, 24); Sound.saucerHit(); }
+    else if (U.hitTime === 0x18) {
+      const v = SAUCER_SCORES[game.sauScoreIdx];
+      U.scoreStr = (v === 50 ? ' 50' : String(v));
+      printText(U.x, SAUCER_YR, U.scoreStr);
+      addScore(v);
+    } else if (U.hitTime <= 0) {
+      clearSmall(U.x, SAUCER_YR, 24);
+      game.saucer = newSaucer();
+    }
+    return;
+  }
+  U.x += U.dx;
+  drawSimple(U.x, SAUCER_YR, U.img, 24);
+  const xr = U.x + XR;
+  if (xr < 0x28 || xr >= 0xE1) {
+    clearSmall(U.x, SAUCER_YR, 24);
+    game.saucer = newSaucer();
+    Sound.ufoStop();
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Main per-frame update (60 Hz)
+ * ------------------------------------------------------------------ */
+function playTick() {
+  game.frame++;
+  // SpeedShots: bombs speed up with fewer than 9 aliens
+  if (game.numAliens < 9) game.aShotDelta = -5;
+  if (game.fireGap > 0) game.fireGap--;
+
+  playerFire();
+  playerTick();
+  playerShotTick();
+  const ph = game.frame % 3;
+  if (ph === 0) rollingTick(); else if (ph === 1) plungerTick(); else saucerOrSquigglyTick();
+
+  game.alienAcc += settings.stepRate / 100;
+  while (game.alienAcc >= 1 && game.state === 'play') { game.alienAcc -= 1; alienTick(); }
+  if (game.state !== 'play') return;
+  rackBump();
+  // TimeToSaucer: only once the rack is below the wave-1 start height
+  if (game.refYr < 0x78 && --game.tillSaucer <= 0) { game.tillSaucer = 0x600; game.saucer.start = 1; }
+
+  countAliens();
+  if (game.numAliens === 0) { game.state = 'roundend'; game.timer = 0x30; return; }
+
+  // fleet movement sound
+  if (game.playerOK && game.numAliens > 0 && game.P.timer === 0) {
+    if (--game.fleetCnt <= 0) {
+      game.fleetNote = (game.fleetNote + 1) & 3;
+      Sound.fleet(game.fleetNote);
+      game.fleetCnt = fleetDelay(game.numAliens);
+    }
+  }
+  if (game.flash > 0) game.flash--;
+}
+
+function roundEndTick() {
+  game.frame++;
+  playerTick();
+  playerShotTick();
+  const ph = game.frame % 3;
+  if (ph === 0) rollingTick(); else if (ph === 1) plungerTick(); else saucerOrSquigglyTick();
+  if (game.state !== 'roundend') return;
+  if (game.flash > 0) game.flash--;
+  if (game.P.alive !== 0xFF) return;             // let a simultaneous death play out
+  if (--game.timer <= 0) nextWave();
+}
+
+function promptTick() {
+  if (--game.timer <= 0) { beginWave(); return; }
+  // the score flashes every 4 frames while "PLAY PLAYER<1>" shows
+  if (game.timer & 4) clearSmall(24, SCORE_YR, 32); else printText(24, SCORE_YR, scoreText(game.score));
+}
+
+function gameOverTick() {
+  const T = ++game.overTimer;
+  const msg = 'GAME OVER';
+  if (game.overChars < msg.length && T % 6 === 0) {
+    printText(72 + 8 * game.overChars, 192, msg[game.overChars]);
+    game.overChars++;
+  }
+  if (T === msg.length * 6 + 120) showOverlay('over');
+}
+
+function demoTick() {
+  game.frame++;
+  game.alienAcc += 1;
+  while (game.alienAcc >= 1) { game.alienAcc -= 1; alienTick(); }
+  rackBump();
+  if (game.refYr <= 0x40) { clearPlayField(); drawBottomLine(); drawShields(); game.alienPos.fill(null); initRack(0x78); drawSimple(game.P.x, PLAYER_YR, PLAYER_SPR, 16); }
+}
+
+function update() {
+  if (game.paused) return;
+  switch (game.state) {
+    case 'menu': demoTick(); break;
+    case 'prompt': promptTick(); break;
+    case 'play': playTick(); break;
+    case 'roundend': roundEndTick(); break;
+    case 'gameover': gameOverTick(); break;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering: paint the 1-bit framebuffer through the colour overlay
+ * (zones from MAME's invaders.lay, which documents the Midway cellophane:
+ * red band for the mystery ship, green over the shields/cannon/lives).
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const off = document.createElement('canvas');
+off.width = SW; off.height = SH;
+const offCtx = off.getContext('2d');
+const img = offCtx.createImageData(SW, SH);
+
+const C_WHITE = [255, 255, 255], C_GREEN = [32, 255, 32], C_RED = [255, 32, 32];
+function zoneColor(x, cy) {
+  if (cy >= 32 && cy < 62) return C_RED;
+  if (cy >= 184 && cy < 240) return C_GREEN;
+  if (cy >= 240 && x >= 16 && x < 134) return C_GREEN;
+  return C_WHITE;
+}
+const ROW_COLOR = [];
+for (let cy = 0; cy < SH; cy++) ROW_COLOR.push([zoneColor(0, cy), zoneColor(16, cy), zoneColor(134, cy)]);
+
+let S = 3;
+function resize() {
+  const s = Math.max(1, Math.min(Math.floor(window.innerWidth / SW), Math.floor(window.innerHeight / SH)));
+  S = s;
+  canvas.width = SW * S; canvas.height = SH * S;
+  canvas.style.width = (SW * S) + 'px'; canvas.style.height = (SH * S) + 'px';
+}
+
+function paintFramebuffer() {
+  const d = img.data;
+  const flash = game.flash > 0 && (game.flash & 2);
+  for (let x = 0; x < SW; x++) {
+    const zone = x < 16 ? 0 : x < 134 ? 1 : 2;
+    const base = x * 32;
+    for (let b = 0; b < 32; b++) {
+      const byte = FB[base + b];
+      const cyTop = 255 - (b * 8 + 7);
+      for (let k = 0; k < 8; k++) {
+        const cy = cyTop + (7 - k);
+        const p = (cy * SW + x) * 4;
+        if (byte & (1 << k)) {
+          const c = ROW_COLOR[cy][zone];
+          d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2]; d[p + 3] = 255;
+        } else if (flash && cy >= 208 && cy < 232 && x >= game.P.x - 4 && x < game.P.x + 20) {
+          d[p] = 255; d[p + 1] = 255; d[p + 2] = 160; d[p + 3] = 255;
+        } else { d[p] = 0; d[p + 1] = 0; d[p + 2] = 0; d[p + 3] = 255; }
+      }
+    }
+  }
+  offCtx.putImageData(img, 0, 0);
+}
+
+function render() {
+  paintFramebuffer();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, SW * S, SH * S);
+  ctx.drawImage(off, 0, 0, SW * S, SH * S);
+  if (settings.invulnerable && game.state !== 'menu') {
+    ctx.font = 'bold ' + (4 * S) + 'px "Courier New", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffff60';
+    ctx.fillText('INVULNERABLE', SW * S - 2 * S, 7 * S);
+  }
+  if (game.paused) {
+    ctx.fillStyle = 'rgba(0,0,0,.5)';
+    ctx.fillRect(0, 0, SW * S, SH * S);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Menu / overlay
+ * ------------------------------------------------------------------ */
+const overlay = document.getElementById('overlay');
+const titleEl = document.getElementById('title');
+const subEl = document.getElementById('sub');
+const presetRow = document.getElementById('presets');
+const knobBox = document.getElementById('knobs');
+const highsEl = document.getElementById('highs');
+const playBtn = document.getElementById('play');
+
+let overlayMode = 'menu';
+let menuRow = 0;                 // 0 = presets, 1..KNOBS.length = knobs, KNOBS.length+1 = play
+
+const presetBtns = {};
+for (const p of PRESET_ORDER) {
+  const b = document.createElement('button');
+  b.textContent = p.toUpperCase();
+  b.addEventListener('click', () => { Sound.unlock(); applyPreset(p); menuRow = 0; refreshMenu(); });
+  presetRow.appendChild(b);
+  presetBtns[p] = b;
+}
+const customLbl = document.createElement('span');
+customLbl.className = 'lbl';
+presetRow.appendChild(customLbl);
+
+const knobEls = [];
+KNOBS.forEach((k, i) => {
+  const row = document.createElement('div');
+  row.className = 'knob';
+  const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = k.label;
+  const dec = document.createElement('button'); dec.textContent = '-';
+  const val = document.createElement('span'); val.className = 'val';
+  const inc = document.createElement('button'); inc.textContent = '+';
+  dec.addEventListener('click', () => { Sound.unlock(); stepKnob(k.key, -1); menuRow = i + 1; refreshMenu(); });
+  inc.addEventListener('click', () => { Sound.unlock(); stepKnob(k.key, 1); menuRow = i + 1; refreshMenu(); });
+  row.appendChild(lbl); row.appendChild(dec); row.appendChild(val); row.appendChild(inc);
+  knobBox.appendChild(row);
+  knobEls.push({ row, val });
+});
+
+function refreshMenu() {
+  const name = presetName();
+  for (const p of PRESET_ORDER) presetBtns[p].classList.toggle('sel', p === name);
+  customLbl.textContent = name === 'custom' ? 'CUSTOM' : '';
+  presetRow.classList.toggle('row-sel', menuRow === 0);
+  KNOBS.forEach((k, i) => {
+    knobEls[i].val.textContent = k.fmt(settings[k.key]);
+    knobEls[i].row.classList.toggle('sel', menuRow === i + 1);
+    knobEls[i].row.classList.toggle('on', !!(k.toggle && settings[k.key]));
+  });
+  playBtn.classList.toggle('sel', menuRow === KNOBS.length + 1);
+  const lines = [];
+  for (const p of PRESET_ORDER.concat(['custom'])) {
+    const h = loadHigh(LS + 'high.' + p), hi = loadHigh(LS + 'high.' + p + '.inv');
+    if (h || hi) lines.push(p.toUpperCase() + ' <b>' + h + '</b>' + (hi ? ' &nbsp;(invulnerable ' + hi + '*)' : ''));
+  }
+  highsEl.innerHTML = lines.length ? 'HIGH SCORES &nbsp;' + lines.join(' &nbsp;&middot;&nbsp; ') : 'NO HIGH SCORES YET';
+  if (game.state === 'menu') { game.high = loadHigh(highKey()); game.ships = settings.lives - 1; drawScores(); drawShips(); }
+  updateSub();
+}
+
+function updateSub() {
+  if (overlayMode === 'over') {
+    subEl.innerHTML = 'SCORE ' + game.score + (game.score >= game.high && game.score > 0 ? ' &mdash; NEW BEST!' : ' &mdash; BEST ' + game.high) +
+      (settings.invulnerable ? ' *' : '') + '<br>WAVE ' + game.wave + (game.invaded ? ' &mdash; THE INVADERS LANDED' : '');
+  } else if (overlayMode === 'pause') {
+    subEl.innerHTML = 'WAVE ' + game.wave + ' &mdash; SCORE ' + game.score;
+  } else {
+    const n = presetName();
+    subEl.innerHTML = n === 'original' ? 'ARCADE DIP DEFAULTS: 3 SHIPS, BONUS AT 1500' :
+      n === 'kid' ? 'SLOW ALIENS, FEW BOMBS, LOTS OF SHIPS' :
+      n === 'easy' ? 'A GENTLE INVASION' : n === 'normal' ? 'ALMOST THE ARCADE' : 'YOUR OWN MIX';
+  }
+}
+
+function showOverlay(mode) {
+  overlayMode = mode;
+  overlay.classList.remove('hidden');
+  const inMenu = mode === 'menu' || mode === 'over';
+  presetRow.style.display = inMenu ? '' : 'none';
+  knobBox.style.display = inMenu ? '' : 'none';
+  highsEl.style.display = inMenu ? '' : 'none';
+  if (mode === 'pause') {
+    titleEl.textContent = 'PAUSED'; titleEl.style.color = '#ffff60';
+    playBtn.textContent = 'RESUME';
+  } else {
+    titleEl.textContent = mode === 'over' ? 'GAME OVER' : 'SPACE INVADERS';
+    titleEl.style.color = mode === 'over' ? '#ff5555' : '#20ff20';
+    playBtn.textContent = mode === 'over' ? 'PLAY AGAIN' : 'PLAY';
+  }
+  refreshMenu();
+}
+function hideOverlay() { overlay.classList.add('hidden'); }
+
+function startPlaying() {
+  Sound.unlock();
+  hideOverlay();
+  game.paused = false;
+  input.left = input.right = input.fire = false;
+  newGame();
+}
+playBtn.addEventListener('click', () => {
+  if (overlayMode === 'pause') { game.paused = false; hideOverlay(); }
+  else startPlaying();
+});
+
+function togglePause() {
+  if (game.state === 'menu' || game.state === 'gameover') return;
+  game.paused = !game.paused;
+  if (game.paused) showOverlay('pause'); else hideOverlay();
+}
+function toMenu() {
+  if (game.state !== 'menu' && game.state !== 'gameover') saveHigh();
+  game.paused = false;
+  game.state = 'menu';
+  demoScene();
+  showOverlay('menu');
+}
+
+/* ------------------------------------------------------------------ *
+ * Input
+ * ------------------------------------------------------------------ */
+function menuKey(k) {
+  const rows = KNOBS.length + 2;
+  if (k === 'ArrowDown' || k === 's' || k === 'S') { menuRow = (menuRow + 1) % rows; refreshMenu(); return true; }
+  if (k === 'ArrowUp' || k === 'w' || k === 'W') { menuRow = (menuRow + rows - 1) % rows; refreshMenu(); return true; }
+  if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'a' || k === 'd' || k === 'A' || k === 'D') {
+    const dir = (k === 'ArrowRight' || k === 'd' || k === 'D') ? 1 : -1;
+    if (menuRow === 0) {
+      const i = Math.max(0, PRESET_ORDER.indexOf(presetName()));
+      applyPreset(PRESET_ORDER[(i + dir + PRESET_ORDER.length) % PRESET_ORDER.length]);
+    } else if (menuRow <= KNOBS.length) stepKnob(KNOBS[menuRow - 1].key, dir);
+    refreshMenu();
+    return true;
+  }
+  if (k >= '1' && k <= '4') { applyPreset(PRESET_ORDER[parseInt(k, 10) - 1]); refreshMenu(); return true; }
+  return false;
+}
+
+window.addEventListener('keydown', (e) => {
+  const k = e.key;
+  const menuOpen = !overlay.classList.contains('hidden');
+  if (menuOpen && overlayMode !== 'pause') {
+    if (k === ' ' || k === 'Enter') { e.preventDefault(); Sound.unlock(); playBtn.click(); return; }
+    if (menuKey(k)) { e.preventDefault(); Sound.unlock(); return; }
+    if (k === 'm' || k === 'M') { Sound.unlock(); Sound.toggle(); }
+    return;
+  }
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') { e.preventDefault(); input.left = true; Sound.unlock(); return; }
+  if (k === 'ArrowRight' || k === 'd' || k === 'D') { e.preventDefault(); input.right = true; Sound.unlock(); return; }
+  if (k === ' ' || k === 'Enter' || k === 'ArrowUp' || k === 'w' || k === 'W') {
+    e.preventDefault(); Sound.unlock();
+    if (menuOpen) { playBtn.click(); return; }
+    input.fire = true; return;
+  }
+  if (k === 'p' || k === 'P') { togglePause(); return; }
+  if (k === 'm' || k === 'M') { Sound.unlock(); Sound.toggle(); return; }
+  if (k === 'Escape') { toMenu(); return; }
+});
+window.addEventListener('keyup', (e) => {
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') input.left = false;
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') input.right = false;
+  else if (k === ' ' || k === 'Enter' || k === 'ArrowUp' || k === 'w' || k === 'W') input.fire = false;
+});
+window.addEventListener('blur', () => { input.left = input.right = input.fire = false; });
+
+/* touch: left third / right third of the canvas move, the middle fires */
+function touchZone(e, on) {
+  const r = canvas.getBoundingClientRect();
+  input.left = input.right = input.fire = false;
+  for (let i = 0; i < e.touches.length; i++) {
+    const fx = (e.touches[i].clientX - r.left) / Math.max(1, r.width);
+    if (fx < 0.33) input.left = true; else if (fx > 0.67) input.right = true; else input.fire = true;
+  }
+  if (!on) input.left = input.right = input.fire = false;
+}
+canvas.addEventListener('touchstart', (e) => { Sound.unlock(); touchZone(e, true); }, { passive: true });
+canvas.addEventListener('touchmove', (e) => { touchZone(e, true); }, { passive: true });
+canvas.addEventListener('touchend', (e) => { touchZone(e, e.touches.length > 0); }, { passive: true });
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && (game.state === 'play' || game.state === 'roundend') && !game.paused) togglePause();
+});
+
+/* ------------------------------------------------------------------ *
+ * Main loop: fixed 60 Hz step with an accumulator
+ * ------------------------------------------------------------------ */
+const STEP = 1 / 60;
+let last = 0, acc = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!last) last = now;
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.25) dt = 0.25;
+  acc += dt;
+  let guard = 0;
+  while (acc >= STEP && guard++ < 10) { update(); acc -= STEP; }
+  render();
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+loadSettings();
+demoScene();
+game.state = 'menu';
+showOverlay('menu');
+resize();
+window.addEventListener('resize', resize);
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>

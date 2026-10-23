@@ -1,0 +1,426 @@
+
+ Journal
+ Contact
+ Journal
+ Home
+Arcade
+Frogger (Sound)
+Journal
+ Site
+ Page
+Amiga
+Rainbow Islands
+1loader-dec
+1loader
+boot
+orig-boot
+Journal
+Arcade
+Asteroids 80%
+Hardware
+RAMUse
+Code
+DVG
+VectorROM
+Journal
+Centipede
+Hardware
+RAMUse
+Code
+Crazy Climber 1%
+BigSpriteGraphics.pdf
+Buildings.pdf
+cclimber.asm
+CharEnc.inc
+CrazyClimberMemoryMapInfo.pdf
+GraphicsAndCharacterAssetInfo.pdf
+MemoryMap.inc
+Defender 75%
+RAMUse
+Hardware
+Bank1
+Bank2
+Bank3
+Bank7
+BankFixed
+Mapping.txt
+SoundHardware
+SoundRAMUse
+SoundCode
+Defender-Theory-Early.pdf
+Defender-Theory-Later.pdf
+Defender.CPU.jpg
+Defender.ROM.B&W.jpg
+Defender.Vid.B&W.jpg
+SoundROM.txt
+Donkey Kong (AI)
+Hardware
+RAMUse
+Code
+Frogger (Sound)
+SoundHardware
+SoundRAMUse
+SoundCode
+Hardware
+RAMUse
+Code
+GFX
+Journal
+Galaga 5%
+CPU1 (Main)
+CPU2 (Secondary)
+CPU3 (Sound)
+GFX1 (Characters)
+GFX2 (Sprites)
+PROMcolors
+PROMpaletteChar
+PROMpaletteSprite
+CPU1Fix
+Journal
+Moon Patrol 75%
+Hardware
+RAMUse
+Code
+GFX1 (Text)
+GFX2 (Sprites)
+GFX3 (Mountains)
+GFX4 (Hills)
+GFX5 (City)
+ImageBackgroundColors
+SpriteColors
+SpriteColorSets
+TextColors
+MoonPatrolSound
+SoundHardware
+SoundRAMUse
+SoundCode
+Journal
+Omega Race 10%
+Hardware
+RAMUse
+MainBoard
+SoundHardware
+SoundRAMUse
+SoundBoard
+DVGPROM
+VectorROM
+Journal
+Pooyan (AI)
+Hardware
+RAMUse
+Code
+Phoenix 90%
+Hardware
+RAMUse
+Code
+Background
+Foreground
+Journal
+Scramble HHi
+phoenixj-func-main2.pdf
+phoenixj-func-main2.scap
+phoenixj.asm-may2025.txt
+phoenixj.asm-may2025.txt.pdf
+Space Invaders
+invaders.asm
+Hardware
+RAMUse
+Code
+Journal
+Tempest
+Hardware
+RAMUse
+Code
+The Pit (AI)
+Hardware
+RAMUse
+Code
+Time Pilot (Sound)
+SoundHardware
+SoundRAMUse
+SoundCode
+Hardware
+RAMUse
+Code
+Journal
+Sea Wolf 1%
+Hardware
+RAMUse
+Code
+Journal
+Scramble 1%
+SoundHardware
+SoundRAMUse
+SoundCode
+Journal
+Atari2600
+Stella (Hardware Info)
+Asteroids 5%
+RAMUse
+Code
+Journal
+Battle Zone 1%
+RAMUse
+Code
+Journal
+Chess 1%
+RAMUse
+Code
+Journal
+Combat 10%
+RAMUse
+Code
+CodePAL
+Journal
+Double Gap
+Code
+DoubleGap.asm
+Journal
+Entombed 1%
+RAMUse
+Code
+Journal
+ET 1%
+RAMUse
+Code
+Journal
+Burger Time 1%
+RAMUse
+CodeBank0
+CodeBank1
+CodeBank2
+CodeBank3
+CodeBank4
+CodeBank5
+CodeBank6
+CodeBank7
+Journal
+Missile Command 1%
+RAMUse
+Code
+Journal
+Space Invaders 1%
+RAMUse
+Code
+Journal
+ColossalCave
+CodeOrg
+DataOrg
+Code350
+Data350
+CoCo
+Hardware
+Early Work
+Pyramid
+RAMUse
+Code
+Journal
+Raaka Tu
+RAMUse
+Code
+Journal
+Bedlam
+RAMUse
+Code
+Journal
+Madness & Minotaur
+Walk Through
+after_start.txt
+after_start.cas
+after_1.txt
+after_1.cas
+after_2.txt
+after_2.cas
+after_3.txt
+after_3.cas
+after_4.txt
+after_4.cas
+after_5.txt
+after_5.cas
+after_6.txt
+after_6.cas
+after_7.txt
+after_7.cas
+after_8.txt
+after_8.cas
+after_9.txt
+after_9.cas
+after_10.txt
+after_10.cas
+after_11.txt
+after_11.cas
+after_12.txt
+after_12.cas
+after_13.txt
+after_13.cas
+after_14.txt
+after_14.cas
+after_15.txt
+after_15.cas
+after_16.txt
+after_16.cas
+after_17.txt
+after_17.cas
+after_18.txt
+after_18.cas
+after_19.txt
+after_19.cas
+after_20.txt
+after_20.cas
+after_21.txt
+after_21.cas
+after_22.txt
+after_22.cas
+after_23.txt
+after_23.cas
+after_24.txt
+after_24.cas
+after_25.txt
+after_25.cas
+RAMUse
+Code
+SaveGameViewer
+Journal
+Mega-Bug
+RAMUse
+Code
+Journal
+Popcorn
+RAMUse
+Code
+Journal
+Daggorath
+RAMUse
+Code
+Level Maps
+Journal
+Downland 5%
+RAMUse
+Code
+Journal
+Audio Analyzer 5%
+RAMUse
+Code
+Journal
+Doubleback
+RAMUse
+Code
+Journal
+NES
+Zelda 5%
+Hardware
+RAMUse
+Bank0
+Bank1
+Bank2
+Bank3
+Bank4
+Bank5
+Bank6
+Bank7
+Journal
+Kid Icarus 1%
+Hardware
+RAMUse
+Bank0
+Bank1
+Bank2
+Bank3
+Bank4
+Bank5
+Bank6
+Bank7
+Journal
+Gameboy
+Hardware
+Link's Awakening 1%
+RAMUse
+Bank00
+Bank01
+Bank02
+Bank03
+Bank04
+Bank05
+Bank06
+Bank07
+Bank08
+Bank09
+Bank0A
+Bank0B
+Bank0C
+Bank0D
+Bank0E
+Bank0F
+Bank10
+Bank11
+Bank12
+Bank13
+Bank14
+Bank15
+Bank16
+Bank17
+Bank18
+Bank19
+Bank1A
+Bank1B
+Bank1C
+Bank1D
+Bank1E
+Bank1F
+Journal
+Tetris 1%
+RAMUse
+Code
+Journal
+TRS80
+HardwareLevel2
+HardwareLevel1
+HardwareDisk
+HauntedHouse
+RAMUse1
+Code1
+RAMUse2
+Code2
+Journal
+Pyramid
+RAMUse
+Code
+RAMUse1
+Code1
+Journal
+RaakaTu
+RAMUse
+Code
+Journal
+Bedlam
+RAMUse
+Code
+Journal
+Xenos
+RAMUse
+Code
+Section1
+Section2
+Section3
+Section4
+Section5
+Section6
+Section7
+Section8
+Section9
+SSVDOBJS
+USVDOBJS
+Journal
+Virus
+Morris Worm 1%
+Journal
+Stoned
+Journal
+Tools
+Blend
+blend.zip
+Journal
+ Journal3/17/2019
+ Journal
+3/17/2019
+I updated the content to the latest markdown format.

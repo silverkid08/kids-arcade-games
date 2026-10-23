@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>BREAKOUT</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Courier New", Courier, monospace; font-weight: bold;
+    color: #fff; -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #stage { position: relative; }
+  canvas#screen { display: block; background: #000; image-rendering: pixelated; cursor: none; touch-action: none; }
+  #overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start; gap: 8px;
+    background: rgba(0,0,0,.86); text-align: center; padding: 12px 10px 14px; overflow-y: auto;
+  }
+  #overlay.hidden { display: none; }
+  #title { margin: 4px 0 0; font-size: 44px; letter-spacing: 8px; line-height: 1; }
+  #title .r { color: #f00032; } #title .o { color: #ffa000; } #title .g { color: #4bc300; } #title .y { color: #fff500; }
+  #title small { display: block; font-size: 11px; letter-spacing: 3px; color: #0078c8; margin-top: 6px; }
+  #sub { margin: 0; font-size: 12px; line-height: 1.7; color: #e8e8e8; letter-spacing: 1px; min-height: 1.7em; max-width: 760px; }
+  #sub b { color: #fff500; }
+  #presets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #presets .lbl, .knob .lbl { font-size: 10px; color: #ffa000; letter-spacing: 1px; }
+  #presets button, .btnrow button {
+    min-width: 64px; height: 28px; font: inherit; font-size: 11px; letter-spacing: 1px; color: #fff; padding: 0 8px;
+    background: #001830; border: 2px solid #0078c8; border-radius: 5px; cursor: pointer;
+  }
+  #presets button:hover, .btnrow button:hover { border-color: #fff; }
+  #presets button.sel { background: #0078c8; border-color: #fff; color: #fff; }
+  #presets.row-sel .lbl { color: #fff500; }
+  #presets .custom { font-size: 11px; color: #fff500; letter-spacing: 1px; }
+  #knobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px 10px; width: 100%; max-width: 720px; }
+  .knob { display: grid; grid-template-columns: 1fr 26px 132px 26px; align-items: center; gap: 4px;
+          padding: 1px 6px; border-radius: 4px; border: 1px solid transparent; }
+  .knob.sel { border-color: #fff500; background: rgba(255,245,0,.08); }
+  .knob .lbl { text-align: left; }
+  .knob .val { font-size: 11px; color: #fff; letter-spacing: 1px; }
+  .knob button {
+    width: 26px; height: 22px; font: inherit; font-size: 13px; color: #fff; padding: 0;
+    background: #001830; border: 2px solid #0078c8; border-radius: 4px; cursor: pointer; line-height: 1;
+  }
+  .knob button:hover { border-color: #fff; }
+  .knob.on .val { color: #50dcff; }
+  #highs, #pstats { font-size: 10px; color: #bdbdbd; letter-spacing: 1px; line-height: 1.7; max-width: 760px; }
+  #highs b, #pstats b { color: #fff; }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #play {
+    font: inherit; font-size: 15px; letter-spacing: 3px; padding: 9px 22px; min-width: 120px; height: auto;
+    color: #000; background: #4bc300; border: 2px solid #4bc300; border-radius: 5px; cursor: pointer;
+  }
+  #play:hover, #play.sel { background: #fff; border-color: #fff500; }
+  .hint { margin: 0; font-size: 10px; color: #8b8b8b; line-height: 1.8; letter-spacing: 1px; }
+  #history { width: 100%; max-width: 760px; font-size: 11px; letter-spacing: 1px; }
+  #history.hidden, #mainmenu.hidden { display: none; }
+  #history table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+  #history th { color: #ffa000; font-size: 10px; text-align: right; padding: 3px 4px; border-bottom: 1px solid #333; }
+  #history td { text-align: right; padding: 3px 4px; color: #ddd; border-bottom: 1px solid #1a1a1a; }
+  #history th:first-child, #history td:first-child { text-align: left; }
+  #history .trend { color: #4bc300; }
+  #mainmenu { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen" width="228" height="240"></canvas>
+</div>
+<div id="overlay">
+  <h1 id="title"><span class="r">BR</span><span class="o">EA</span><span class="g">KO</span><span class="y">UT</span><small>ATARI 1976 &middot; MOUSE EDITION</small></h1>
+  <p id="sub"></p>
+  <div id="mainmenu">
+    <div id="presets"><span class="lbl">PRESET</span></div>
+    <div id="knobs"></div>
+    <div id="highs"></div>
+    <div id="pstats"></div>
+    <div class="btnrow">
+      <button id="play">PLAY</button>
+      <button id="resume">RESUME</button>
+      <button id="showhist">PROGRESS</button>
+    </div>
+    <p class="hint">MOUSE moves the paddle &nbsp;&middot;&nbsp; CLICK (or SPACE) serves &nbsp;&middot;&nbsp; &larr;&rarr; / A D also move &nbsp;&middot;&nbsp; P pause &nbsp;&middot;&nbsp; M sound &nbsp;&middot;&nbsp; ESC menu<br>
+      menu: &uarr;&darr; pick a row, &larr;&rarr; change it, 1-4 presets, ENTER play</p>
+  </div>
+  <div id="history" class="hidden">
+    <div id="histbody"></div>
+    <div class="btnrow"><button id="hideh">BACK</button><button id="clearh">CLEAR HISTORY</button></div>
+  </div>
+</div>
+<script>
+/* =====================================================================
+   BREAKOUT (Atari, 1976) - a faithful clone for kids, played with the
+   mouse instead of the paddle knob.
+
+   The arcade machine has no CPU: it is ~100 TTL chips (designed by
+   Steve Wozniak / Atari) driving a black-and-white monitor mounted
+   sideways, with strips of coloured cellophane glued over the glass.
+   Everything here that decides how the game plays was worked out from
+   the gate-level netlist in MAME (src/mame/atari/nl_breakout.cpp, a copy
+   is in reference/), which transcribes the Atari schematics.  Comments
+   name the chips and signals (B5, A6, D5, F7, BP_HIT, VB_HIT ...) so
+   each rule can be checked against the netlist.
+
+   Coordinates.  The monitor is rotated 90 degrees, so:
+     playfield x (left -> right) = scan line, V counter running backwards
+     playfield y (top  -> bottom) = H counter tick within a line
+   One x unit is one scan line, one y unit is one H clock tick (3.5
+   master clocks of 14.318 MHz).  A y unit is ~1.4x taller than an x unit
+   is wide, so the canvas is stretched by unequal integer factors.
+   Visible area: 228 lines (x 0..227) by 240 ticks (y 0..239).
+   ===================================================================== */
+(function () {
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * Machine constants (see README "How the numbers were derived")
+ * ------------------------------------------------------------------ */
+const W = 228, H = 240;
+const MASTER_HZ = 14318180;                 // Y1 crystal
+const TICK_CLOCKS = 3.5;                    // H counter clock = 4 ticks per 7 master clocks (2:2:1 pattern)
+const FRAME_TICKS = 256 * 252 - 4;          // L1/K1 count 256 per line; V jumps 224 -> 228 (VERT_TRIG loads M1=4, L1=5)
+const FPS = MASTER_HZ / (TICK_CLOCKS * FRAME_TICKS);   // 63.42 Hz
+const LINE_HZ = MASTER_HZ / (TICK_CLOCKS * 256);       // 15980 Hz
+
+const WALL_W = 4, RWALL_X = 224;            // LH_SIDE V=220..223 -> x 0..3 ; RH_SIDE V=252..255 -> x 224..227
+const TOP_Y0 = 24, TOP_Y1 = 31;             // TOP_BOUND: H128..H32 low, H16 & H8 high -> H 24..31
+const ROWS = 8, COLS = 14;
+const BRICK_Y0 = 64, ROW_PITCH = 4, BRICK_LIT = 3;     // RAM L3 enabled for H 64..95 (H64, !H32, !H128); H1&H2 is the row gap
+const BRICK_X0 = 2, COL_PITCH = 16, BRICK_W = 14;      // V16..V128 pick the column; V2&V4&V8 (V mod 16 = 14,15) is the gap
+const ROW_VALUE = [7, 7, 5, 5, 3, 3, 1, 1];            // N9 is loaded with 1 + 2*!H8 + 4*!H16 at the hit
+const PAD_Y0 = 212, PAD_Y1 = 215;           // PAD_n: H128 H64 H16 H4 high, H32 H8 low -> H 212..215
+const PAD_W = 15, PAD_W_SHRUNK = 7;         // D4 counts 0..15 on H128 (once per line), or on H64 (twice) after F5 is set
+const BALL_W = 4, BALL_H = 2;               // BALL: B7 = 12..15 (4 lines) and C7 = 14,15 (2 ticks)
+const LOST_Y = 240;                         // ball seen during HSYNC (H >= 240) sets SERVE_WAIT
+const SERVE_Y = 143;                        // SERVE_WAIT flip-flop A3 is clocked at H = 144
+const XMIN = -24, XSPAN = 252;              // the ball's line counter wraps over all 252 lines of a frame
+const SEG_COUNTS = 15;                      // paddle counter values 0..14 are displayed
+
+/* sounds: the ball's line counter B7/B8 bits gated by 9602 one-shots */
+const SND = {
+  paddle: [LINE_HZ / 8, 0.0087],            // B7 QC (P_HIT_SOUND) for A8#1: 27k x 1uF
+  wall: [LINE_HZ / 16, 0.0214],             // B7 QD (VB_HIT_SOUND) for A7#1: 68k x 1uF
+  brick: [LINE_HZ / 32, 0.0087]             // B8 QA (BRICK_SOUND) for A8#2: 27k x 1uF, one beep per point
+};
+const BEEP_GAP = Math.ceil(0.0713 * FPS);   // A7#2 (22k x 10uF) spaces the beeps, next VSYNC starts one
+const BLINK_FRAMES = Math.round(0.1248 * FPS);  // 555 B2 (560R + 1.8M, 0.1uF) flashes the player's score at ~4 Hz
+
+/* colour overlay (MAME layout/breakout.lay, converted to H ticks) */
+const rgba = (r, g, b) => (0xFF000000 | (b << 16) | (g << 8) | r) >>> 0;
+const COL = {
+  black: rgba(0, 0, 0), white: rgba(255, 255, 255),
+  red: rgba(240, 0, 50), orange: rgba(255, 160, 0), green: rgba(75, 195, 0), yellow: rgba(255, 245, 0), blue: rgba(0, 120, 200),
+  badge: rgba(80, 220, 255), hint: rgba(200, 200, 200)
+};
+const BANDS = [[64, 71, 'red'], [72, 79, 'orange'], [80, 87, 'green'], [88, 95, 'yellow'], [212, 217, 'blue']];
+const ROWCOL = new Uint32Array(H).fill(COL.white);
+for (const [a, b, c] of BANDS) for (let y = a; y <= b; y++) ROWCOL[y] = COL[c];
+
+/* score digits: 7448 decoder + 9312 multiplexers.  12 lines x 14 ticks.
+   a / g / d are 2 ticks thick at rows 0, 6, 12; b c e f are 4 lines thick. */
+const SEG7 = { 0: 'abcdef', 1: 'bc', 2: 'abdeg', 3: 'abcdg', 4: 'bcfg', 5: 'acdfg', 6: 'acdefg', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg' };
+const SEG_RECT = { a: [0, 0, 12, 2], g: [0, 6, 12, 2], d: [0, 12, 12, 2], f: [0, 0, 4, 8], b: [8, 0, 4, 8], e: [0, 8, 4, 6], c: [8, 8, 4, 6] };
+// x = 223 - V: player number V 208..219, ball number V 80..91, scores 160..207 (P1) and 32..79 (P2)
+const DIGIT_POS = { player: [4, 32], ball: [132, 32], p1: [[20, 48], [36, 48], [52, 48]], p2: [[148, 48], [164, 48], [180, 48]] };
+
+/* tiny 3x5 font for the kid-mode badges (not part of the arcade screen) */
+const TINY_SRC = {
+  A: '.#./#.#/###/#.#/#.#', B: '##./#.#/##./#.#/##.', C: '.##/#../#../#../.##', D: '##./#.#/#.#/#.#/##.', E: '###/#../##./#../###', F: '###/#../##./#../#..',
+  G: '.##/#../#.#/#.#/.##', H: '#.#/#.#/###/#.#/#.#', I: '###/.#./.#./.#./###', J: '..#/..#/..#/#.#/.#.', K: '#.#/#.#/##./#.#/#.#', L: '#../#../#../#../###',
+  M: '#.#/###/###/#.#/#.#', N: '##./#.#/#.#/#.#/#.#', O: '.#./#.#/#.#/#.#/.#.', P: '##./#.#/##./#../#..', Q: '.#./#.#/#.#/##./.##', R: '##./#.#/##./#.#/#.#',
+  S: '.##/#../.#./..#/##.', T: '###/.#./.#./.#./.#.', U: '#.#/#.#/#.#/#.#/###', V: '#.#/#.#/#.#/#.#/.#.', W: '#.#/#.#/###/###/#.#', X: '#.#/#.#/.#./#.#/#.#',
+  Y: '#.#/#.#/.#./.#./.#.', Z: '###/..#/.#./#../###', '0': '###/#.#/#.#/#.#/###', '1': '.#./##./.#./.#./###', '2': '###/..#/###/#../###', '3': '###/..#/.##/..#/###',
+  '4': '#.#/#.#/###/..#/..#', '5': '###/#../###/..#/###', '6': '###/#../###/#.#/###', '7': '###/..#/..#/..#/..#', '8': '###/#.#/###/#.#/###', '9': '###/#.#/###/..#/###',
+  ' ': '.../.../.../.../...', '!': '.#./.#./.#./.../.#.', '-': '.../.../###/.../...', ':': '.../.#./.../.#./...', '%': '#.#/..#/.#./#../#.#', '.': '.../.../.../.../.#.'
+};
+const TINY = {};
+for (const k in TINY_SRC) TINY[k] = TINY_SRC[k].replace(/\//g, '');
+
+/* ------------------------------------------------------------------ *
+ * Settings: presets and knobs
+ * ------------------------------------------------------------------ */
+const LS = 'breakout.';
+const WIDTH_NAME = { 15: 'ARCADE (15)', 20: 'WIDER (20)', 24: 'WIDE (24)', 32: 'EXTRA WIDE (32)', 40: 'HUGE (40)', 56: 'GIANT (56)' };
+const SERVE_NAME = { button: 'CLICK (ARCADE)', auto: 'AUTOMATIC', sticky: 'STICKY PADDLE' };
+const onOff = v => (v ? 'ON' : 'OFF');
+const KNOBS = [
+  { key: 'speed', label: 'BALL SPEED', vals: [40, 50, 60, 70, 80, 90, 100, 110, 125], fmt: v => v + '%' },
+  { key: 'speedups', label: 'BALL SPEEDS UP', vals: [1, 0], fmt: onOff },
+  { key: 'width', label: 'PADDLE WIDTH', vals: [15, 20, 24, 32, 40, 56], fmt: v => WIDTH_NAME[v] },
+  { key: 'shrink', label: 'PADDLE SHRINKS', vals: [1, 0], fmt: onOff },
+  { key: 'rows', label: 'BRICK ROWS', vals: [1, 2, 3, 4, 5, 6, 7, 8] },
+  { key: 'balls', label: 'BALLS', vals: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+  { key: 'sens', label: 'MOUSE SENSITIVITY', vals: [50, 75, 100, 125, 150, 200, 300], fmt: v => v + '%' },
+  { key: 'serve', label: 'SERVE', vals: ['button', 'auto', 'sticky'], fmt: v => SERVE_NAME[v] },
+  { key: 'endless', label: 'ENDLESS WALLS', vals: [0, 1], fmt: onOff },
+  { key: 'blink', label: 'SCORE BLINKS', vals: [1, 0], fmt: onOff },
+  { key: 'inv', label: 'INVULNERABLE', vals: [0, 1], fmt: onOff }
+];
+const KNOB = {}; KNOBS.forEach(k => { KNOB[k.key] = k; });
+const PRESETS = {
+  kid: { speed: 50, speedups: 0, width: 40, shrink: 0, rows: 4, balls: 9, sens: 150, serve: 'sticky', endless: 1, blink: 0, inv: 1 },
+  easy: { speed: 70, speedups: 1, width: 24, shrink: 0, rows: 6, balls: 5, sens: 125, serve: 'sticky', endless: 0, blink: 0, inv: 0 },
+  normal: { speed: 90, speedups: 1, width: 15, shrink: 1, rows: 8, balls: 5, sens: 100, serve: 'auto', endless: 0, blink: 1, inv: 0 },
+  original: { speed: 100, speedups: 1, width: 15, shrink: 1, rows: 8, balls: 3, sens: 100, serve: 'button', endless: 0, blink: 1, inv: 0 }
+};
+const PRESET_ORDER = ['kid', 'easy', 'normal', 'original'];
+const settings = Object.assign({}, PRESETS.original);
+
+function presetName() {
+  for (const p of PRESET_ORDER) {
+    const P = PRESETS[p];
+    if (Object.keys(P).every(k => P[k] === settings[k])) return p;
+  }
+  return 'custom';
+}
+function applyPreset(p) { Object.assign(settings, PRESETS[p]); saveSettings(); }
+function setKnob(key, v) { if (KNOB[key] && KNOB[key].vals.includes(v)) { settings[key] = v; saveSettings(); } }
+function stepKnob(key, d) {
+  const k = KNOB[key]; let i = k.vals.indexOf(settings[key]); if (i < 0) i = 0;
+  i = Math.max(0, Math.min(k.vals.length - 1, i + d)); settings[key] = k.vals[i]; saveSettings();
+}
+function lsGet(k) { try { return localStorage.getItem(LS + k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(LS + k, v); } catch (e) { /* storage unavailable */ } }
+function lsDel(k) { try { localStorage.removeItem(LS + k); } catch (e) { /* storage unavailable */ } }
+function saveSettings() { lsSet('settings', JSON.stringify(settings)); }
+function loadSettings() {
+  let s = null; try { s = JSON.parse(lsGet('settings') || 'null'); } catch (e) { s = null; }
+  if (s && typeof s === 'object') for (const k of KNOBS) if (k.vals.includes(s[k.key])) settings[k.key] = s[k.key];
+}
+function highKey(preset, inv) { return 'high.' + (preset || presetName()) + (((inv === undefined) ? settings.inv : inv) ? '.inv' : ''); }
+function getHigh(key) { return parseInt(lsGet(key) || '0', 10) || 0; }
+function loadJSON(k, def) { try { const v = JSON.parse(lsGet(k) || 'null'); return v === null ? def : v; } catch (e) { return def; } }
+
+/* ------------------------------------------------------------------ *
+ * Sound: square-wave beeps at the machine's frequencies
+ * ------------------------------------------------------------------ */
+const Sound = (function () {
+  let ac = null, master = null, muted = false;
+  const log = [];
+  muted = lsGet('muted') === '1';
+  function init() {
+    if (ac) { if (ac.state === 'suspended' && ac.resume) ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { ac = new AC(); } catch (e) { ac = null; return; }
+    master = ac.createGain(); master.gain.value = muted ? 0 : 0.22; master.connect(ac.destination);
+  }
+  function tone(hz, dur, vol, type) {
+    if (!ac || muted) return;
+    const t = ac.currentTime + 0.004;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'square'; o.frequency.value = hz;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.0008);
+    g.gain.setValueAtTime(vol, t + Math.max(0.001, dur - 0.0008)); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.01);
+  }
+  function play(name) {
+    log.push(name); if (log.length > 6000) log.splice(0, 2000);
+    const s = SND[name];
+    if (s) tone(s[0], s[1], 0.5);
+    else if (name === 'bounce') { tone(196, 0.07, 0.4, 'triangle'); }       // kid-mode floor bounce (not an arcade sound)
+  }
+  function setMuted(m) { muted = m; lsSet('muted', m ? '1' : '0'); if (master) master.gain.value = m ? 0 : 0.22; }
+  return { init, play, setMuted, isMuted: () => muted, log };
+})();
+
+/* ------------------------------------------------------------------ *
+ * Game state
+ * ------------------------------------------------------------------ */
+let rngState = 0x1D2B;
+function rnd() { rngState = (rngState * 1103515245 + 12345) & 0x7FFFFFFF; return rngState >>> 8; }
+function seed(s) { rngState = (s >>> 0) & 0x7FFFFFFF || 1; }
+
+function newStats() { return { catches: 0, misses: 0, rally: 0, best: 0, bricks: 0, saves: 0 }; }
+const ball = { x: 120, y: SERVE_Y, left: false, up: false, outer: false };
+const game = {
+  mode: 'attract', frame: 0, playFrames: 0, paused: false,
+  score: 0, lastScore: 0, bricks: new Uint8Array(ROWS * COLS), wall: 1, wallsCleared: 0, ballsLost: 0,
+  serveWait: false, served: false, over: false, finished: false, endTimer: 0, pendingRefill: false,
+  hits: 0, ro: false, shrunk: false, armed: true,                 // B5 hit counter, D5#2 orange/red flag, F5 shrink, F7 brick arm
+  padR: 120, padVel: 0, padContact: false, wallContact: false, launchSide: 0,
+  beeps: 0, beepGap: 0, flash: 0,
+  stats: newStats(), preset: 'original', inv: 0, sessionOpen: false, lastSummary: null
+};
+const input = { gx: (W - 1) / 2, serve: false, keyL: false, keyR: false, keyMode: false };
+
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+function wrapX(x) { while (x < XMIN) x += XSPAN; while (x >= XMIN + XSPAN) x -= XSPAN; return x; }
+/* which V counter value a playfield x is drawn on (x 0..223 = V 223..0, then the wall / blanking lines) */
+function vOfX(x) { x = wrapX(x); return x >= RWALL_X ? 479 - x : x >= 0 ? 223 - x : 227 - x; }
+
+function fillWall() {
+  game.bricks.fill(0);
+  for (let r = ROWS - settings.rows; r < ROWS; r++) for (let c = 0; c < COLS; c++) game.bricks[r * COLS + c] = 1;
+}
+function bricksLeft() { let n = 0; for (let i = 0; i < game.bricks.length; i++) n += game.bricks[i]; return n; }
+
+/* ---- paddle ---- */
+function shrunkW(w) { return Math.max(2, Math.round(w * PAD_W_SHRUNK / PAD_W)); }
+function padRect() {
+  if (game.mode === 'attract') return { l: 0, r: W - 1, w: W };            // ATTRACT forces C3.11: paddle on every line
+  const w = game.shrunk ? shrunkW(settings.width) : settings.width;     // the shrunk paddle keeps its right edge (D4 starts there)
+  return { l: game.padR - w + 1, r: game.padR, w };
+}
+/* absolute knob: the cursor's x across the canvas maps onto the paddle's whole travel */
+function padTarget(gx) {
+  const w0 = settings.width, travel = W - w0;
+  const t = clamp(0.5 + (gx - (W - 1) / 2) / (W - 1) * (settings.sens / 100), 0, 1);
+  return Math.round(t * travel) + w0 - 1;
+}
+function updatePaddle() {
+  const w0 = settings.width;
+  let r;
+  if (input.keyL || input.keyR) { input.keyMode = true; r = game.padR + (input.keyR ? 3 : 0) - (input.keyL ? 3 : 0); }
+  else if (input.keyMode) r = game.padR;
+  else r = padTarget(input.gx);
+  r = clamp(r, w0 - 1, W - 1);
+  game.padVel = r - game.padR; game.padR = r;
+}
+/* paddle counter D4 value under line lx -> segment (PD = bit 3, PC = bit 2) */
+function paddleSeg(p, lx) {
+  const i = p.r - lx;
+  const c = Math.min(SEG_COUNTS - 1, Math.floor(i * SEG_COUNTS / p.w));
+  return c >> 2;
+}
+
+/* ---- ball speed: B5 hit counter, D5#2, A6 latch -> load values of the ball counters ----
+   per frame the ball moves (4 - Y) lines and (4 - L) ticks, where Y = B7 load (Y0 Y1 Y2)
+   and L = C7 load (CX0 CX1 X2); see README for the gate-by-gate derivation. */
+function ballSpeed() {
+  const QC = (game.hits & 4) !== 0, QD = (game.hits & 8) !== 0;
+  const vy = game.ro ? 3 : (QC ? 2 : 1);            // X0 = !QC, CX0 / CX1 flipped by D5#2
+  const vx = QD ? 3 : (ball.outer ? 2 : 1);         // V_SLOW = !QD; A6#2 (outer paddle segment) only matters while slow
+  const k = settings.speed / 100;
+  return { vx: vx * k, vy: vy * k, rawX: vx, rawY: vy };
+}
+function countHit() {                               // B5 counts X2 rising edges and stops at 12 (QC & QD)
+  if (!settings.speedups) return;
+  if ((game.hits & 12) === 12) return;
+  game.hits++;
+}
+
+function moveBall() {
+  const sp = ballSpeed();
+  ball.x = wrapX(ball.x + (ball.left ? -sp.vx : sp.vx));
+  ball.y += ball.up ? -sp.vy : sp.vy;
+}
+
+function findBrick(bx, by) {
+  // the first coincidence in raster order wins: smallest V (= rightmost line), then smallest H
+  for (let k = BALL_W - 1; k >= 0; k--) {
+    const px = bx + k; if (px < 0 || px > 223) continue;
+    const rel = px - BRICK_X0; if (rel < 0) continue;
+    if (rel % COL_PITCH >= BRICK_W) continue;
+    const c = (rel / COL_PITCH) | 0; if (c >= COLS) continue;
+    for (let py = by; py < by + BALL_H; py++) {
+      if (py < BRICK_Y0 || py >= BRICK_Y0 + ROWS * ROW_PITCH) continue;
+      const r = (py - BRICK_Y0) >> 2;
+      if (game.bricks[r * COLS + c]) return r * COLS + c;
+    }
+  }
+  return -1;
+}
+
+function brickHit(idx, live) {
+  game.bricks[idx] = 0;
+  game.armed = false;                               // F7 reset by BRICK_HIT: no more bricks until paddle / top wall
+  const r = (idx / COLS) | 0;
+  if (ball.up) ball.up = false; else { ball.up = true; countHit(); }    // D5#1 toggles
+  if (r <= 3 && settings.speedups) { game.ro = true; game.hits = 15; }  // H16 low (orange/red): D5#2 -> SU_n loads B5 with 15
+  if (!live) return;
+  game.score += ROW_VALUE[r];
+  game.beeps = Math.min(16, game.beeps + ROW_VALUE[r]);                 // F6 queues one beep per point counted
+  game.stats.bricks++;
+  if (bricksLeft() === 0) wallCleared();
+}
+function wallCleared() {
+  game.wallsCleared++;
+  if (settings.endless || game.wall < 2) game.pendingRefill = true;     // F4 latches on the next paddle hit (score 448 pattern)
+  else { game.finished = true; game.endTimer = Math.round(2 * FPS); }
+}
+function onCatch() {
+  Sound.play('paddle');
+  const s = game.stats; s.catches++; s.rally++; if (s.rally > s.best) s.best = s.rally;
+  if (game.pendingRefill) { game.pendingRefill = false; fillWall(); game.wall++; }   // FPD1 one-shot rewrites the brick RAM
+}
+
+function ballLost() {
+  if (game.finished || game.over) { game.serveWait = true; return; }
+  const s = game.stats; s.misses++; s.rally = 0;
+  if (settings.inv) {                               // kid mode: bounce off the floor with a flash
+    ball.y = LOST_Y - BALL_H - 1; ball.up = true; game.flash = 18; s.saves++;
+    Sound.play('bounce');
+    return;
+  }
+  Sound.log.push('lost');
+  game.serveWait = true; game.served = settings.serve === 'auto';
+  game.hits = 0; game.ro = false; game.shrunk = false;                  // SERVE_WAIT clears B5, D5#2 and F5
+  game.ballsLost++;
+  if (game.ballsLost >= settings.balls) { game.over = true; game.endTimer = Math.round(1.5 * FPS); }
+}
+
+/* everything the video coincidence circuits detect in one frame, at the ball's new position */
+function collide(live) {
+  const bx = Math.floor(ball.x), by = Math.floor(ball.y);
+  // side boundaries: ball shown while VSYNC (V >= 224) -> VB_HIT; A6#1 latches V16 = new direction
+  let maxV = -1;
+  for (let k = 0; k < BALL_W; k++) {
+    const px = wrapX(bx + k);
+    if (px < 0 || px >= RWALL_X) { const v = vOfX(px); if (v > maxV) maxV = v; }
+  }
+  if (maxV >= 0) {
+    ball.left = (maxV & 16) !== 0;
+    if (live && !game.wallContact) Sound.play('wall');
+    game.wallContact = true;
+  } else game.wallContact = false;
+  // top wall: BTB_HIT clears D5 (down), arms F7, sets F5 (half paddle)
+  if (by <= TOP_Y1 && by + BALL_H - 1 >= TOP_Y0) {
+    ball.up = false; game.armed = true;
+    if (live && settings.shrink) game.shrunk = true;
+  }
+  // paddle: BP_HIT presets D5 (up); A6 latches PD (direction) and PC^PD (angle) of the last line touched
+  const p = padRect();
+  if (by + BALL_H - 1 >= PAD_Y0 && by <= PAD_Y1 && bx + BALL_W - 1 >= p.l && bx <= p.r) {
+    const lx = Math.max(bx, p.l), seg = paddleSeg(p, lx);
+    ball.left = seg >= 2; ball.outer = seg === 0 || seg === 3;
+    if (!ball.up) { ball.up = true; countHit(); }
+    game.armed = true;
+    if (!game.padContact) { game.padContact = true; if (live) onCatch(); }
+  } else game.padContact = false;
+  // bricks: BALL coincident with a lit RAM cell while F7 is armed
+  if (game.armed && by + BALL_H - 1 >= BRICK_Y0 && by < BRICK_Y0 + ROWS * ROW_PITCH) {
+    const hit = findBrick(bx, by);
+    if (hit >= 0) brickHit(hit, live);
+  }
+  // bottom: ball reaches HSYNC
+  if (by + BALL_H - 1 >= LOST_Y) {
+    if (live) ballLost(); else { ball.y = LOST_Y - BALL_H - 1; ball.up = true; }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Serving
+ * ------------------------------------------------------------------ */
+function launchFromPaddle() {                       // sticky-paddle serve (kid option)
+  game.serveWait = false; ball.up = true; ball.outer = false; game.armed = true;
+  ball.left = game.padVel < 0 ? true : game.padVel > 0 ? false : ((game.launchSide ^= 1) === 1);
+  game.padContact = true;
+}
+function serveTick() {
+  if (game.over) return;
+  if (settings.serve === 'sticky') {
+    const p = padRect();
+    ball.x = Math.floor((p.l + p.r + 1) / 2) - 2; ball.y = PAD_Y0 - BALL_H;
+    if (input.serve) launchFromPaddle();
+    return;
+  }
+  // arcade: the invisible ball keeps moving (down 1 tick / frame, B5 cleared) while SERVE_WAIT;
+  // pressing SERVE presets A3#1, then SERVE_WAIT clears when the ball passes H = 144.
+  const sp = ballSpeed();
+  ball.x = wrapX(ball.x + (ball.left ? -sp.vx : sp.vx));
+  const y0 = ball.y;
+  ball.y += sp.vy; if (ball.y >= 256) ball.y -= 256;
+  if (settings.serve === 'auto' || input.serve) game.served = true;
+  if (game.served && ball.y > y0 && y0 <= SERVE_Y + 1 && ball.y >= SERVE_Y) {
+    game.serveWait = false; game.served = false;
+    ball.y = SERVE_Y; ball.up = false;              // SBD_n clears D5: the serve always goes down
+    game.armed = true; game.padContact = false;
+    Sound.log.push('serve');
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Modes
+ * ------------------------------------------------------------------ */
+function resetBallState() { game.hits = 0; game.ro = false; game.shrunk = false; game.armed = true; game.padContact = false; game.wallContact = false; }
+function startGame() {
+  closeSession();
+  game.mode = 'play'; game.paused = false; game.playFrames = 0;
+  game.score = 0; game.wall = 1; game.wallsCleared = 0; game.ballsLost = 0;
+  game.over = false; game.finished = false; game.endTimer = 0; game.pendingRefill = false;
+  game.beeps = 0; game.beepGap = 0; game.flash = 0;
+  game.stats = newStats(); game.preset = presetName(); game.inv = settings.inv; game.sessionOpen = true;
+  resetBallState(); fillWall();
+  game.serveWait = true; game.served = settings.serve === 'auto';
+  ball.x = 30 + (rnd() % 160); ball.y = settings.serve === 'auto' ? 240 : rnd() % 256;
+  ball.left = (rnd() & 1) === 1; ball.outer = false; ball.up = false;
+  hideOverlay();
+}
+function attractTick() {
+  if (game.serveWait) { game.serveWait = false; ball.y = SERVE_Y; ball.up = false; }
+  moveBall(); collide(false);
+  if (bricksLeft() === 0) { game.bricks.fill(1); }
+}
+function playTick() {
+  game.playFrames++;
+  if (game.serveWait) serveTick();
+  else { moveBall(); collide(true); }
+  if (game.endTimer > 0 && --game.endTimer === 0) finishGame();
+}
+function finishGame() {
+  game.lastScore = game.score;
+  endSession(true);
+}
+function soundTick() {
+  if (game.beepGap > 0) game.beepGap--;
+  if (game.beeps > 0 && game.beepGap === 0) { Sound.play('brick'); game.beeps--; game.beepGap = BEEP_GAP; }
+}
+
+function update() {
+  game.frame++;
+  if (game.paused) { input.serve = false; return; }
+  updatePaddle();
+  if (game.mode === 'attract') attractTick();
+  else if (game.mode === 'play') playTick();
+  soundTick();
+  if (game.flash > 0) game.flash--;
+  input.serve = false;
+}
+
+/* ------------------------------------------------------------------ *
+ * Session statistics
+ * ------------------------------------------------------------------ */
+function summarise(st) {
+  const tries = st.catches + st.misses;
+  return { catches: st.catches, misses: st.misses, tries, rate: tries ? Math.round(100 * st.catches / tries) : 0, best: st.best, bricks: st.bricks };
+}
+function closeSession() { if (game.sessionOpen) endSession(false); }
+function endSession(toMenu) {
+  if (game.sessionOpen) {
+    game.sessionOpen = false;
+    const sum = summarise(game.stats);
+    sum.score = game.score; sum.walls = game.wallsCleared; sum.preset = game.preset; sum.inv = game.inv ? 1 : 0;
+    sum.date = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const hk = highKey(game.preset, game.inv);
+    sum.newHigh = game.score > getHigh(hk);
+    if (sum.newHigh) lsSet(hk, String(game.score));
+    if (sum.tries > 0) {
+      const hist = loadJSON('history', []);
+      hist.push(sum); while (hist.length > 10) hist.shift();
+      lsSet('history', JSON.stringify(hist));
+      const ps = loadJSON('stats.' + game.preset, { games: 0, catches: 0, misses: 0, best: 0, bestRate: 0, bestScore: 0 });
+      ps.games++; ps.catches += sum.catches; ps.misses += sum.misses; ps.best = Math.max(ps.best, sum.best);
+      if (sum.tries >= 5) ps.bestRate = Math.max(ps.bestRate, sum.rate);
+      ps.bestScore = Math.max(ps.bestScore, sum.score);
+      lsSet('stats.' + game.preset, JSON.stringify(ps));
+    }
+    game.lastSummary = sum;
+    game.lastScore = game.score;
+  }
+  game.mode = 'attract'; game.serveWait = true; resetBallState();
+  if (toMenu) toMenu_('gameover');
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering: a 1-bit "monitor" image, then the cellophane colours
+ * ------------------------------------------------------------------ */
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const img = ctx.createImageData(W, H);
+const fb = new Uint32Array(img.data.buffer);
+const mono = new Uint8Array(W * H);
+
+function litRect(x, y, w, h) {
+  const x0 = Math.max(0, x), x1 = Math.min(W, x + w), y0 = Math.max(0, y), y1 = Math.min(H, y + h);
+  if (x1 <= x0) return;
+  for (let yy = y0; yy < y1; yy++) mono.fill(1, yy * W + x0, yy * W + x1);
+}
+function drawDigit(d, x0, y0) {
+  for (const s of SEG7[d]) { const r = SEG_RECT[s]; litRect(x0 + r[0], y0 + r[1], r[2], r[3]); }
+}
+function drawNumber3(n, pos) {
+  const v = ((n % 1000) + 1000) % 1000;
+  drawDigit(Math.floor(v / 100), pos[0][0], pos[0][1]);
+  drawDigit(Math.floor(v / 10) % 10, pos[1][0], pos[1][1]);
+  drawDigit(v % 10, pos[2][0], pos[2][1]);
+}
+function drawTiny(str, x, y, c) {
+  for (const ch of String(str).toUpperCase()) {
+    const g = TINY[ch] || TINY[' '];
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 3; k++) {
+      if (g[r * 3 + k] === '#') { const X = x + k, Y = y + r; if (X >= 0 && X < W && Y >= 0 && Y < H) fb[Y * W + X] = c; }
+    }
+    x += 4;
+  }
+}
+function ballVisible() {
+  if (game.mode === 'attract') return !game.serveWait;
+  if (game.mode !== 'play') return false;
+  if (!game.serveWait) return true;
+  return settings.serve === 'sticky' && !game.over;
+}
+function render() {
+  mono.fill(0);
+  litRect(0, 0, WALL_W, H); litRect(RWALL_X, 0, WALL_W, H);            // LH_SIDE / RH_SIDE
+  litRect(0, TOP_Y0, W, TOP_Y1 - TOP_Y0 + 1);                           // TOP_BOUND
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++)
+    if (game.bricks[r * COLS + c]) litRect(BRICK_X0 + c * COL_PITCH, BRICK_Y0 + r * ROW_PITCH, BRICK_W, BRICK_LIT);
+  const playing = game.mode === 'play';
+  drawDigit(1, DIGIT_POS.player[0], DIGIT_POS.player[1]);                               // player number
+  drawDigit(playing ? Math.min(9, game.ballsLost + 1) : 1, DIGIT_POS.ball[0], DIGIT_POS.ball[1]);
+  const blinkOff = playing && settings.blink && !game.paused && Math.floor(game.playFrames / BLINK_FRAMES) % 2 === 1;
+  if (!blinkOff) drawNumber3(playing ? game.score : game.lastScore, DIGIT_POS.p1);
+  drawNumber3(0, DIGIT_POS.p2);                                                         // player 2 (1-player game)
+  const p = padRect();
+  litRect(p.l, PAD_Y0, p.w, PAD_Y1 - PAD_Y0 + 1);
+  if (ballVisible()) {
+    const bx = Math.floor(ball.x), by = Math.floor(ball.y);
+    for (let k = 0; k < BALL_W; k++) { const px = wrapX(bx + k); if (px >= 0 && px < W) litRect(px, by, 1, BALL_H); }
+  }
+  // the cellophane: every lit pixel takes the colour of its band
+  for (let y = 0, i = 0; y < H; y++) {
+    const c = ROWCOL[y];
+    for (let x = 0; x < W; x++, i++) fb[i] = mono[i] ? c : COL.black;
+  }
+  // kid-mode badges, drawn in the black strip above the top wall
+  if (playing && game.inv) drawTiny('INVULNERABLE', 6, 4, COL.badge);
+  if (playing && game.serveWait && !game.over && !game.served && settings.serve !== 'auto' && (game.frame >> 4) % 2 === 0)
+    drawTiny(settings.serve === 'sticky' ? 'CLICK TO LAUNCH' : 'CLICK TO SERVE', 6, 13, COL.hint);
+  if (playing && settings.endless && game.wall > 1) drawTiny('WALL ' + game.wall, 190, 4, COL.hint);
+  if (game.paused) drawTiny('PAUSED', 102, 150, COL.white);
+  if (game.flash > 0 && (game.flash & 2)) for (let y = H - 3; y < H; y++) fb.fill(COL.badge, y * W + WALL_W, y * W + RWALL_X);
+  ctx.putImageData(img, 0, 0);
+}
+
+/* ------------------------------------------------------------------ *
+ * Menu overlay
+ * ------------------------------------------------------------------ */
+const overlay = document.getElementById('overlay');
+const subEl = document.getElementById('sub');
+const presetsEl = document.getElementById('presets');
+const knobsEl = document.getElementById('knobs');
+const highsEl = document.getElementById('highs');
+const pstatsEl = document.getElementById('pstats');
+const playBtn = document.getElementById('play');
+const resumeBtn = document.getElementById('resume');
+const histEl = document.getElementById('history');
+const mainEl = document.getElementById('mainmenu');
+const menu = { row: 0, rows: [] };
+const presetBtns = {};
+let customLbl = null;
+const knobRows = {};
+
+(function buildMenu() {
+  for (const p of PRESET_ORDER) {
+    const b = document.createElement('button'); b.textContent = p.toUpperCase();
+    b.addEventListener('click', () => { applyPreset(p); refreshMenu(); });
+    presetsEl.appendChild(b); presetBtns[p] = b;
+  }
+  customLbl = document.createElement('span'); customLbl.className = 'custom'; presetsEl.appendChild(customLbl);
+  for (const k of KNOBS) {
+    const row = document.createElement('div'); row.className = 'knob';
+    const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = k.label;
+    const minus = document.createElement('button'); minus.textContent = '−';
+    const val = document.createElement('span'); val.className = 'val';
+    const plus = document.createElement('button'); plus.textContent = '+';
+    minus.addEventListener('click', () => { stepKnob(k.key, -1); refreshMenu(); });
+    plus.addEventListener('click', () => { stepKnob(k.key, 1); refreshMenu(); });
+    row.appendChild(lbl); row.appendChild(minus); row.appendChild(val); row.appendChild(plus);
+    knobsEl.appendChild(row); knobRows[k.key] = { row, val };
+  }
+  menu.rows = ['presets'].concat(KNOBS.map(k => k.key), ['play']);
+})();
+
+function refreshMenu() {
+  const p = presetName();
+  for (const q of PRESET_ORDER) presetBtns[q].classList.toggle('sel', q === p);
+  customLbl.textContent = p === 'custom' ? 'CUSTOM' : '';
+  presetsEl.classList.toggle('row-sel', menu.rows[menu.row] === 'presets');
+  for (const k of KNOBS) {
+    const r = knobRows[k.key], v = settings[k.key];
+    r.val.textContent = k.fmt ? k.fmt(v) : String(v);
+    r.row.classList.toggle('sel', menu.rows[menu.row] === k.key);
+    r.row.classList.toggle('on', k.key === 'inv' && v === 1);
+  }
+  playBtn.classList.toggle('sel', menu.rows[menu.row] === 'play');
+  const parts = PRESET_ORDER.concat(['custom']).map(q => {
+    const h = getHigh(highKey(q, 0)), hi = getHigh(highKey(q, 1));
+    return q.toUpperCase() + ' <b>' + (h || '-') + '</b>' + (hi ? ' (' + hi + '*)' : '');
+  });
+  highsEl.innerHTML = 'HIGH SCORES: ' + parts.join(' &middot; ') + '<br>* = set with INVULNERABLE on &nbsp; (arcade maximum is 896: two walls of 448)';
+  const ps = loadJSON('stats.' + p, null);
+  pstatsEl.innerHTML = ps ? ('MOUSE SKILLS (' + p.toUpperCase() + '): ' + ps.games + ' GAMES &middot; CATCH RATE <b>' +
+    (ps.catches + ps.misses ? Math.round(100 * ps.catches / (ps.catches + ps.misses)) : 0) + '%</b> OVERALL, BEST <b>' + ps.bestRate +
+    '%</b> &middot; LONGEST RALLY <b>' + ps.best + '</b> &middot; BEST SCORE <b>' + ps.bestScore + '</b>') : 'MOUSE SKILLS: no games played with this preset yet';
+  resumeBtn.style.display = (game.mode === 'play' && game.sessionOpen) ? '' : 'none';
+}
+function showOverlay(text) {
+  subEl.innerHTML = text || '';
+  histEl.classList.add('hidden'); mainEl.classList.remove('hidden');
+  overlay.classList.remove('hidden'); refreshMenu();
+  canvas.style.cursor = 'default';
+}
+function hideOverlay() { overlay.classList.add('hidden'); canvas.style.cursor = 'none'; }
+function overlayOpen() { return !overlay.classList.contains('hidden'); }
+function toMenu_(why) {
+  let text = 'Move the mouse left and right to steer the paddle. Knock out the bricks! Pick a preset, then PLAY.';
+  if (why === 'gameover' && game.lastSummary) {
+    const s = game.lastSummary;
+    text = '<b>GAME OVER</b> &nbsp; SCORE ' + s.score + (s.newHigh ? ' &nbsp; <b>NEW HIGH SCORE!</b>' : '') + ' &nbsp; WALLS CLEARED ' + s.walls +
+      '<br>CATCH RATE <b>' + s.rate + '%</b> (' + s.catches + ' of ' + s.tries + ' balls caught) &nbsp; LONGEST RALLY <b>' + s.best +
+      '</b> &nbsp; BRICKS <b>' + s.bricks + '</b>';
+  } else if (why === 'pause') {
+    text = 'PAUSED &nbsp; RESUME, or change settings and PLAY to restart.';
+  }
+  showOverlay(text);
+}
+function openMenu() {
+  if (game.mode !== 'play') return;
+  game.paused = true;
+  toMenu_('pause');
+}
+function resume() { hideOverlay(); game.paused = false; }
+function quitToMenu() { closeSession(); game.paused = false; game.mode = 'attract'; toMenu_('menu'); }
+function togglePause() { if (game.mode === 'play') game.paused = !game.paused; }
+function historyHTML() {
+  const hist = loadJSON('history', []);
+  if (!hist.length) return '<p>No games recorded yet. Play a game and the last 10 will appear here.</p>';
+  let h = '<p>LAST ' + hist.length + ' GAMES (newest at the bottom)</p><table><tr><th>DATE</th><th>PRESET</th><th>SCORE</th><th>WALLS</th><th>CAUGHT</th><th>CATCH RATE</th><th>LONGEST RALLY</th></tr>';
+  for (const s of hist) {
+    h += '<tr><td>' + s.date + '</td><td>' + String(s.preset).toUpperCase() + (s.inv ? '*' : '') + '</td><td>' + s.score + '</td><td>' + s.walls +
+      '</td><td>' + s.catches + '/' + s.tries + '</td><td>' + s.rate + '%</td><td>' + s.best + '</td></tr>';
+  }
+  h += '</table>';
+  if (hist.length >= 2) {
+    const half = Math.floor(hist.length / 2), a = hist.slice(0, half), b = hist.slice(half);
+    const avg = (arr, f) => arr.reduce((t, s) => t + f(s), 0) / arr.length;
+    h += '<p class="trend">Older half vs newer half: catch rate ' + avg(a, s => s.rate).toFixed(0) + '% &rarr; ' + avg(b, s => s.rate).toFixed(0) +
+      '%, longest rally ' + avg(a, s => s.best).toFixed(1) + ' &rarr; ' + avg(b, s => s.best).toFixed(1) + '</p>';
+  }
+  return h + '<p>* = INVULNERABLE was on</p>';
+}
+playBtn.addEventListener('click', () => { Sound.init(); startGame(); });
+resumeBtn.addEventListener('click', () => resume());
+document.getElementById('showhist').addEventListener('click', () => {
+  document.getElementById('histbody').innerHTML = historyHTML();
+  mainEl.classList.add('hidden'); histEl.classList.remove('hidden');
+});
+document.getElementById('hideh').addEventListener('click', () => { histEl.classList.add('hidden'); mainEl.classList.remove('hidden'); });
+document.getElementById('clearh').addEventListener('click', () => { lsDel('history'); document.getElementById('histbody').innerHTML = historyHTML(); });
+
+/* ------------------------------------------------------------------ *
+ * Input
+ * ------------------------------------------------------------------ */
+/* client (CSS pixel) coordinates -> game pixel, through the (unequal) integer CSS scale */
+function toGameX(clientX) {
+  const r = canvas.getBoundingClientRect();
+  const w = r.width || W;
+  return (clientX - r.left) * W / w;
+}
+function toGame(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const w = r.width || W, h = r.height || H;
+  const gx = Math.floor((clientX - r.left) * W / w), gy = Math.floor((clientY - r.top) * H / h);
+  return { x: clamp(gx, 0, W - 1), y: clamp(gy, 0, H - 1) };
+}
+function aimAt(clientX) { input.gx = toGameX(clientX); input.keyMode = false; }
+canvas.addEventListener('mousemove', e => aimAt(e.clientX));
+window.addEventListener('mousemove', e => { if (!overlayOpen()) aimAt(e.clientX); });
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (e.preventDefault) e.preventDefault();
+  Sound.init(); aimAt(e.clientX); input.serve = true;
+});
+window.addEventListener('mousedown', e => { if (!overlayOpen() && e.button === 0 && e.target !== canvas) input.serve = true; });
+canvas.addEventListener('contextmenu', e => { if (e.preventDefault) e.preventDefault(); });
+canvas.addEventListener('touchstart', e => {
+  if (e.preventDefault) e.preventDefault();
+  Sound.init();
+  const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+  aimAt(t.clientX); input.serve = true;
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (e.preventDefault) e.preventDefault();
+  const t = e.changedTouches && e.changedTouches[0]; if (t) aimAt(t.clientX);
+}, { passive: false });
+
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  Sound.init();
+  if (k === 'm' || k === 'M') { Sound.setMuted(!Sound.isMuted()); return; }
+  if (overlayOpen()) {
+    if (!histEl.classList.contains('hidden')) { if (k === 'Escape') { histEl.classList.add('hidden'); mainEl.classList.remove('hidden'); } return; }
+    const row = menu.rows[menu.row];
+    if (k === 'ArrowDown') { menu.row = (menu.row + 1) % menu.rows.length; refreshMenu(); }
+    else if (k === 'ArrowUp') { menu.row = (menu.row + menu.rows.length - 1) % menu.rows.length; refreshMenu(); }
+    else if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      const d = k === 'ArrowLeft' ? -1 : 1;
+      if (row === 'presets') { let i = PRESET_ORDER.indexOf(presetName()); i = i < 0 ? 0 : clamp(i + d, 0, 3); applyPreset(PRESET_ORDER[i]); }
+      else if (KNOB[row]) stepKnob(row, d);
+      refreshMenu();
+    } else if (k >= '1' && k <= '4') { applyPreset(PRESET_ORDER[+k - 1]); refreshMenu(); }
+    else if (k === 'Enter') startGame();
+    else if (k === 'Escape' && game.sessionOpen && game.mode === 'play') resume();
+    else return;
+    if (e.preventDefault) e.preventDefault();
+    return;
+  }
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') input.keyL = true;
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') input.keyR = true;
+  else if (k === ' ' || k === 'Enter' || k === 'ArrowUp' || k === 'w' || k === 'W') input.serve = true;
+  else if (k === 'p' || k === 'P') togglePause();
+  else if (k === 'Escape') openMenu();
+  else if (k === 'q' || k === 'Q') { if (game.paused) quitToMenu(); }
+  else return;
+  if (e.preventDefault) e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') input.keyL = false;
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') input.keyR = false;
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && game.mode === 'play' && !game.paused) togglePause(); });
+
+/* ------------------------------------------------------------------ *
+ * Layout and main loop (fixed timestep at the machine's 63.42 Hz)
+ * ------------------------------------------------------------------ */
+// a y unit (H tick) is ~1.4x taller than an x unit (scan line) is wide: pick integer pairs near that
+const SCALES = [[5, 7], [4, 6], [3, 4], [2, 3], [1, 1]];
+function layout() {
+  let s = SCALES[SCALES.length - 1];
+  for (const c of SCALES) if (W * c[0] <= window.innerWidth && H * c[1] <= window.innerHeight) { s = c; break; }
+  canvas.style.width = W * s[0] + 'px'; canvas.style.height = H * s[1] + 'px';
+  const st = document.getElementById('stage'); st.style.width = W * s[0] + 'px'; st.style.height = H * s[1] + 'px';
+  return s;
+}
+window.addEventListener('resize', layout);
+
+let last = 0, acc = 0;
+const STEP = 1000 / FPS;
+function frame(ts) {
+  if (!last) last = ts;
+  acc += Math.min(250, ts - last); last = ts;
+  let n = 0;
+  while (acc >= STEP && n < 8) { update(); acc -= STEP; n++; }
+  if (n) render();
+  requestAnimationFrame(frame);
+}
+
+loadSettings();
+layout();
+game.bricks.fill(1);
+ball.x = 100; ball.y = SERVE_Y; ball.left = false; ball.outer = true;
+toMenu_('menu');
+render();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

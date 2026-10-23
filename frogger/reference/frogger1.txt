@@ -1,0 +1,71 @@
+ 
+ Frogger Tutorial part 1 
+ Frogger Tutorial part 1 
+ System Message: WARNING/2 ( <string> , line 5) 
+Explicit markup ends without a blank line; unexpected unindent. 
+ Contents 
+ Converting the graphics 
+ Creating the game sketch 
+ This tutorial will show you how to create a clone of the old &quot;Frogger&quot;
+game for the Gameduino. Here is the what the finished product looks
+like - a playable version of the arcade classic, running on the
+Gameduino: 
+ It assumes you have an Arduino and Gameduino,
+with the Arduino &quot;Sketch&quot; development library loaded, as well as
+the Gameduino library. 
+ Starting with the graphics, we are lucky that GaryCXJk has made a
+sprite sheet of all the original Frogger game graphics for us to
+use: 
+ There is even a complete background screen for the game. 
+ To get the graphics into the Gameduino, we'll need to slice it up
+into parts for all the different animated elements in the game. 
+ I do graphics preparation working on .png images using Gimp,
+because .png is lossless and handles transparency, and because
+Gimp is open source and has good features for pixel editing. 
+ Converting the graphics 
+ Gameduino has two types of graphics: background and sprites. The
+background is good for static things, sprites for the animated
+stuff. So with Frogger, the natural split is to put the road and
+river in the background, and all the moving gameplay things as
+sprites. Spending a little time in Gimp moving things around gives
+a background image, which is 224 pixels wide by 256 pixels high: 
+ and a sprite sheet, with all the sprites as 16x16 pixel images, arranged on a grid: 
+ Feeding these through the online conversion tools at http://gameduino.com/tools gives two sketches, the background: 
+ http://gameduino.com/results/5f30d40b/ 
+ Which loaded on the Gameduino gives this screen: 
+ and the sprites: 
+ http://gameduino.com/results/ceb9b4e1/ 
+ which gives this screen when run on the Gameduino: 
+ Creating the game sketch 
+ The next step is to merge these sketches into one, which will be the beginning of the actual Frogger game. 
+ To merge the two sketches: 
+ open the two sketches side-by side 
+ use the tab menu to add a new tab to the background sketch, call it sprites.h 
+ copy all the code from the old sprites.h tab and paste it into the new one 
+ take the display code from the sprite's setup and add it at the end of background setup 
+ The merged sketch code should look like this: 
+ #include <SPI.h> 
+ #include <GD.h> 
+ #include &quot;froggerbg.h&quot; 
+ #include &quot;sprite.h&quot; 
+ void setup () 
+ { 
+ GD . begin (); 
+ for ( byte y = 0 ; y < 32 ; y ++ ) 
+ GD . copy ( RAM_PIC + y * 64 , froggerbg_pic + y * 28 , 28 ); 
+ GD . copy ( RAM_CHR , froggerbg_chr , sizeof ( froggerbg_chr )); 
+ GD . copy ( RAM_PAL , froggerbg_pal , sizeof ( froggerbg_pal )); 
+ GD . copy ( PALETTE16A , sprite_sprpal , sizeof ( sprite_sprpal )); 
+ GD . uncompress ( RAM_SPRIMG , sprite_sprimg ); 
+ // For show, randomly scatter the frames on the screen 
+ GD . __wstartspr ( 0 ); 
+ for ( byte anim = 0 ; anim < SPRITE_FRAMES ; anim ++ ) 
+ draw_sprite ( random ( 400 ), random ( 300 ), anim , 0 ); 
+ GD . __end (); 
+ } 
+ void loop () 
+ { 
+ } 
+ Compiling and running this sketch gives the background, with the
+sprites randomly placed. 
+ Now the gameplay coding can begin... in part 2 . 

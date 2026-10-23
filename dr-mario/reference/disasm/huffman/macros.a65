@@ -1,0 +1,227 @@
+; ----------------------------------------------------------------------------
+; Compound instructions
+
+; Add without carry
+.macro add u,v
+    .ifblank u v
+        .error "Missing parameter for add instruction"
+    .else
+    .ifblank v
+        clc
+        adc u
+    .else
+        clc
+        adc u,v
+    .endif
+    .endif
+.endmacro
+
+; Subtract without carry
+.macro sub u,v
+    .ifblank u v
+        .error "Missing parameter for sub instruction"
+    .else
+    .ifblank v
+        sec
+        sbc u
+    .else
+        sec
+        sbc u,v
+    .endif
+    .endif
+.endmacro
+
+
+; ----------------------------------------------------------------------------
+; If-then-else
+
+.macro if_mi
+        .scope
+        bpl __else__
+.endmacro
+
+.macro if_pl
+        .scope
+        bmi __else__
+.endmacro
+
+.macro if_vs
+        .scope
+        bvc __else__
+.endmacro
+
+.macro if_vc
+        .scope
+        bvs __else__
+.endmacro
+
+.macro if_cs
+        .scope
+        bcc __else__
+.endmacro
+
+.macro if_cc
+        .scope
+        bcs __else__
+.endmacro
+
+.macro if_eq
+        .scope
+        bne __else__
+.endmacro
+
+.macro if_ne
+        .scope
+        beq __else__
+.endmacro
+
+.macro else
+        jmp __end_if__
+        __else__:
+.endmacro
+
+.macro end_if
+        .ifndef __else__
+        __else__:
+        .endif
+        __end_if__:
+        .endscope
+.endmacro
+
+; ----------------------------------------------------------------------------
+; Long conditionals
+
+.macro if_pl_jmp
+        .scope
+        bpl __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_mi_jmp
+        .scope
+        bmi __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_vc_jmp
+        .scope
+        bvc __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_vs_jmp
+        .scope
+        bvs __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_cc_jmp
+        .scope
+        bcc __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_cs_jmp
+        .scope
+        bcs __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_ne_jmp
+        .scope
+        bne __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+.macro if_eq_jmp
+        .scope
+        beq __then__
+        jmp __else__
+        __then__:
+.endmacro
+
+
+; ----------------------------------------------------------------------------
+; While loops
+
+.macro loop
+        .scope
+        continue:
+.endmacro
+
+.macro while_pl
+        bpl continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_mi
+        bmi continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_vc
+        bvc continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_vs
+        bvs continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_cc
+        bcc continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_cs
+        bcs continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_ne
+        bne continue
+        break:
+        .endscope
+.endmacro
+
+.macro while_eq
+        beq continue
+        break:
+        .endscope
+.endmacro
+
+.macro forever
+        jmp continue
+        break:
+        .endscope
+.endmacro
+
+; ----------------------------------------------------------------------------
+; Begin-end blocks
+
+.macro begin
+        .scope
+        continue:
+.endmacro
+
+.macro end
+        .ifndef continue
+        .error "end without begin"
+        .endif
+        break:
+        .endscope
+.endmacro
